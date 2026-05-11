@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0;}
+
+:root{
+  --bg:#0a0c0f;--sf:#111418;--sf2:#171b21;--sf3:#1e232b;
+  --b:rgba(255,255,255,0.07);--b2:rgba(255,255,255,0.13);
+  --tx:#e8eaed;--mu:#6b7280;--dm:#3d4450;
+  --sb:#2a3040;--logo-fg:white;
+}
+.light{
+  --bg:#f4f6f9;--sf:#ffffff;--sf2:#eef0f4;--sf3:#e4e7ec;
+  --b:rgba(0,0,0,0.08);--b2:rgba(0,0,0,0.15);
+  --tx:#111418;--mu:#5a6478;--dm:#9ca3af;
+  --sb:#c5cad5;--logo-fg:#111418;
+}
+
+body,#root{background:var(--bg);min-height:100vh;transition:background .25s;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--sb);border-radius:2px;transition:background .25s;}
+::-webkit-scrollbar-track{background:transparent;}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes slideIn{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}
+@keyframes ping{0%{opacity:.8;transform:scale(1)}100%{opacity:0;transform:scale(2.5)}}
+
+.anim-in{animation:fadeUp .3s ease both;}
