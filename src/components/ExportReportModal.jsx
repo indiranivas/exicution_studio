@@ -51,6 +51,61 @@ function downloadFile(content, filename, mime) {
   URL.revokeObjectURL(url);
 }
 
+function downloadAsPdf(htmlContent, title, isDark) {
+  const date = new Date().toLocaleString();
+  const win  = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>${title}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; line-height: 1.7; color: #0f172a; background: #fff; padding: 48px; max-width: 900px; margin: 0 auto; }
+  .cover { border-bottom: 3px solid #009ADA; padding-bottom: 24px; margin-bottom: 32px; }
+  .cover-title { font-size: 26px; font-weight: 300; color: #0f172a; margin-bottom: 6px; }
+  .cover-sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #64748b; }
+  h1 { font-size: 20px; font-weight: 600; color: #0f172a; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #009ADA; }
+  h2 { font-size: 16px; font-weight: 600; color: #009ADA; margin: 22px 0 8px; }
+  h3 { font-size: 14px; font-weight: 600; color: #334155; margin: 16px 0 6px; }
+  h4 { font-size: 12px; font-weight: 600; color: #64748b; margin: 12px 0 4px; }
+  p  { margin: 6px 0 10px; }
+  ul, ol { padding-left: 22px; margin: 6px 0 10px; }
+  li { margin: 4px 0; }
+  strong { font-weight: 600; color: #0f172a; }
+  code { font-family: 'IBM Plex Mono', monospace; font-size: 10px; background: #f1f5f9; padding: 1px 5px; border-radius: 3px; }
+  pre { font-family: 'IBM Plex Mono', monospace; font-size: 10px; background: #f1f5f9; padding: 14px 16px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 20px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 12px 0; font-family: 'IBM Plex Mono', monospace; page-break-inside: avoid; }
+  td, th { padding: 7px 10px; border: 1px solid #e2e8f0; vertical-align: top; text-align: left; }
+  tr:first-child td, th { background: #f8fafc; font-weight: 600; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #94a3b8; }
+  @media print {
+    body { padding: 24px; font-size: 11px; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 14px; }
+    h3 { font-size: 13px; }
+    table { font-size: 10px; }
+    td, th { padding: 5px 8px; }
+    @page { margin: 20mm; size: A4; }
+  }
+<\/style>
+<\/head>
+<body>
+<div class="cover">
+  <div class="cover-title">LevelShift AgentOps</div>
+  <div class="cover-title" style="font-size:18px;margin-top:4px">${title}<\/div>
+  <div class="cover-sub" style="margin-top:12px">Generated: ${date} &nbsp;·&nbsp; prod-us-east-1 &nbsp;·&nbsp; Azure OpenAI<\/div>
+<\/div>
+${htmlContent}
+<div class="footer">LevelShift AgentOps &nbsp;·&nbsp; Confidential &nbsp;·&nbsp; Generated ${date}<\/div>
+<\/body><\/html>`);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 800);
+}
+
 export default function ExportReportModal({ st, onClose, mode = 'business' }) {
   const [status,  setStatus]  = useState('idle'); // idle | loading | done | error
   const [report,  setReport]  = useState('');
@@ -76,6 +131,11 @@ export default function ExportReportModal({ st, onClose, mode = 'business' }) {
       setErrMsg(e.message || 'Unknown error');
       setStatus('error');
     }
+  }
+
+  function handleDownloadPdf() {
+    const title = mode === 'technical' ? 'Technical Engineering Report' : 'AI Operations Report';
+    downloadAsPdf(renderMarkdown(report), title, false);
   }
 
   function handleDownloadMd() {
@@ -151,8 +211,11 @@ export default function ExportReportModal({ st, onClose, mode = 'business' }) {
           {status === 'loading' && (
             <div style={{ textAlign: 'center', padding: '60px 0', color: C.mu }}>
               <div style={{ fontSize: 28, marginBottom: 16, animation: 'spin 1s linear infinite', display: 'inline-block' }}>◌</div>
-              <div style={{ fontFamily: mono, fontSize: 12 }}>Analysing telemetry and generating report…</div>
+              <div style={{ fontFamily: mono, fontSize: 12 }}>Analysing telemetry and generating detailed report…</div>
               <div style={{ fontFamily: mono, fontSize: 11, color: C.dm, marginTop: 6 }}>
+                {mode === 'technical' ? '14 sections · spans · guardrails · MELT · root cause · action items' : '13 sections · metrics · ROI · risks · recommendations'}
+              </div>
+              <div style={{ fontFamily: mono, fontSize: 11, color: C.dm, marginTop: 4 }}>
                 Calling Azure OpenAI · {import.meta.env.VITE_AZURE_OPENAI_DEPLOYMENT}
               </div>
             </div>
@@ -190,6 +253,10 @@ export default function ExportReportModal({ st, onClose, mode = 'business' }) {
             display: 'flex', gap: 8, padding: '14px 20px',
             borderTop: `1px solid ${C.b2}`, flexShrink: 0, flexWrap: 'wrap',
           }}>
+            <button onClick={handleDownloadPdf} style={{
+              fontFamily: mono, fontSize: 11, padding: '7px 16px', borderRadius: 4,
+              border: `1px solid #ef4444`, background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 500,
+            }}>⬇ Download PDF</button>
             <button onClick={handleDownloadMd} style={{
               fontFamily: mono, fontSize: 11, padding: '7px 16px', borderRadius: 4,
               border: `1px solid ${ACCENT}`, background: ACCENT, color: '#fff', cursor: 'pointer', fontWeight: 500,

@@ -74,36 +74,66 @@ function buildSnapshot(st) {
   };
 }
 
-const SYSTEM_PROMPT_BUSINESS = `You are a senior AI operations analyst. 
+const SYSTEM_PROMPT_BUSINESS = `You are a senior AI operations analyst writing a board-level report.
 You will be given a JSON telemetry snapshot from an enterprise AI agent platform.
-Generate a detailed, professional executive business report in Markdown.
+Generate a detailed, professional executive business report in Markdown. Be thorough — this is a formal document.
 
-The report MUST include these sections in order:
-1. **Executive Summary** – 3–4 sentence plain-English overview of today's AI platform status, key wins, and risks.
-2. **Performance Highlights** – Bullet list of 4–6 standout metrics with brief business interpretation.
-3. **Agent Fleet Status** – A Markdown table of all agents: Name | Status | Confidence | Tasks | Errors | Latency | Cost. Flag any agent with status "failed" or "degraded" with ⚠.
-4. **Cost & ROI Analysis** – Total spend, labour value offset, ROI ratio, and a 2–3 sentence interpretation.
-5. **Human Oversight & Approvals** – Pending vs resolved approvals, avg resolution time, and risk assessment.
-6. **Recent Incidents & Alerts** – List the recent alerts/events and classify each as Critical / Warning / Informational.
-7. **Recommendations** – 3–5 specific, actionable recommendations for the operations team based on the data.
-8. **Risk Register** – Short table: Risk | Likelihood | Impact | Mitigation.
+The report MUST include ALL of these sections in order:
 
-Use clear, non-technical language for Sections 1, 4, and 5. Use technical precision for 3 and 6.
-Do NOT include any preamble before the first heading.`;
+# AI Operations Report — LevelShift AgentOps
 
-const SYSTEM_PROMPT_TECHNICAL = `You are a senior platform reliability engineer and AI systems expert.
+1. **Executive Summary** – 5–6 sentences: platform status, key wins, risks, and the single most important action needed today. Write for a C-suite audience.
+2. **Key Business Metrics** – A table with columns: Metric | Value | Target | Status. Include: Tasks Automated, Success Rate, Hours Saved, Labour Value Offset, AI Cost, ROI Multiple, Pending Approvals, Escalations.
+3. **Performance Highlights** – Bullet list of 6–8 standout achievements with specific numbers and business interpretation for each.
+4. **Agent Fleet Status** – A Markdown table: Agent Name | Type | Version | Status | Confidence | Tasks Handled | Errors | Avg Latency | Token Cost. Flag ⚠ for any agent with errors > 0 or status not 'running'.
+5. **Session & Workflow Analysis** – Table of all sessions: Session | Agent | Stage | Messages | Outcome | Quality Score. Summarise deflection and escalation patterns.
+6. **Cost & ROI Deep Dive** – Total AI spend, labour value, net saving, ROI multiple. Monthly and annual projections. Cost breakdown per agent. 3–4 sentence business narrative on value delivered.
+7. **Guardrail & Compliance Summary** – How many guardrail checks ran, pass rate, types checked (PII/Policy/Toxicity), any blocks and what triggered them. Rate the compliance posture: Excellent / Good / At Risk.
+8. **Human Oversight & Approvals** – Escalated sessions, pending approvals, avg resolution time. Assess whether escalation rate is acceptable.
+9. **Incidents & Alerts** – List every error event with timestamp, agent, description. Classify each: 🔴 Critical / 🟡 Warning / 🔵 Informational.
+10. **Trend Analysis** – Based on quality scores across sessions, identify if quality is improving, stable, or declining. Identify any pipeline stages with low coverage.
+11. **Recommendations** – 5–7 specific, numbered, actionable recommendations for the operations team. Each must reference actual data from the snapshot.
+12. **Risk Register** – Table: Risk | Likelihood (H/M/L) | Impact (H/M/L) | Current Status | Recommended Mitigation.
+13. **Appendix: Data Confidence** – Note which metrics are real (from spans) vs. estimated (e.g. hours saved uses 0.27h/message assumption). Timestamp of report.
+
+Formatting rules:
+- Use Markdown tables wherever data is tabular
+- Use ✅ for healthy, ⚠ for warning, 🔴 for critical status indicators
+- Bold all numbers that are key metrics
+- Non-technical language for sections 1, 6, 8. Technical precision everywhere else.
+- Do NOT include any preamble before the first heading.
+- Total length: aim for 800–1200 words of substance.`;
+
+const SYSTEM_PROMPT_TECHNICAL = `You are a senior platform reliability engineer and AI systems expert writing a formal technical report.
 You will be given a detailed JSON telemetry snapshot from an enterprise AI agent observability platform.
-Generate a comprehensive technical engineering report in Markdown for an engineering team.
+Generate a comprehensive technical engineering report in Markdown for an engineering and DevOps team.
 
-The report MUST include these sections in order:
-1. **System Health Summary** – Brief technical overview: span success rate, guardrail pass rate, latency p50/p99, error distribution.
-2. **MELT Telemetry Analysis** – Per-agent table: Agent | Spans | LLM Calls | Tool Calls | Guardrails | Avg Latency (ms) | Token Cost | Quality Score. Highlight anomalies.
-3. **Span & Trace Analysis** – Breakdown of span kinds (LLM_CALL, TOOL_CALL, GUARDRAIL, PLANNER, INTERNAL), success vs failure counts, top error messages.
-4. **Guardrail Performance** – Table per guardrail type (PII / Policy / Toxicity): Check Count | Pass | Fail | Pass Rate | Top Reason Code. Flag any type below 90%.
-5. **LLM Call Performance** – Model usage, avg input/output tokens, avg latency, quality score distribution, toxic flags.
-6. **Tool Call Reliability** – Per tool type: call count, success rate, avg duration, top errors.
-7. **Session Quality Analysis** – Per-session table: Session ID | Agent | Messages | Deflected | Escalated | Quality Score.
-8. **Pipeline Stage Coverage** – Table of L2O pipeline stages reached: Stage | Sessions | Coverage %.
+The report MUST include ALL of these sections in order:
+
+# Technical Engineering Report — LevelShift AgentOps
+
+1. **System Health Summary** – Overall health: span success rate, guardrail pass rate, feedback acceptance rate, error count, session deflection/escalation ratio. One-line verdict: HEALTHY / DEGRADED / CRITICAL.
+2. **MELT Telemetry — Agent Breakdown** – Per-agent table: Agent | Version | Status | Spans | LLM Calls | Tool Calls | Guardrail Checks | Avg Latency (ms) | Input Tokens | Output Tokens | Token Cost | Avg Quality Score. Mark anomalies.
+3. **Span & Trace Analysis** – Full breakdown table: Span Kind | Total | Succeeded | Failed | Failure Rate. List all failed span IDs with agent, session, kind, and error message.
+4. **LLM Call Performance** – Table: Model | Calls | Avg Input Tokens | Avg Output Tokens | Avg Latency (ms) | Avg Quality Score | Toxic Responses. Flag quality < 0.7 as ⚠. Flag toxic responses as 🔴.
+5. **Guardrail Performance** – Table per guardrail type: Type | Checks | Passed | Blocked | Pass Rate | Top Block Reason. Highlight any type below 95% pass rate. List each individual blocked event with session and reason code.
+6. **Tool Call Reliability** – Table: Tool Name | Type | Calls | Succeeded | Failed | Success Rate | Avg Duration (ms) | Top Error. List all failed tool calls with full error messages.
+7. **Session Quality Analysis** – Full table: Session | Agent | Pipeline Stage | Messages | Spans | Deflected | Escalated | Avg Quality Score | Notes. Highlight sessions with quality < 0.7 or escalated.
+8. **Pipeline Coverage** – Table: Stage | Sessions Reached | Coverage % | Status. Identify gaps (stages with 0 coverage).
+9. **Feedback & Human Override Analysis** – Table: Agent | Feedback Events | Accepted | Edited | Rejected | Accept Rate | Avg Edit Distance. Flag agents with accept rate < 80%.
+10. **Token & Cost Breakdown** – Per-agent token usage (input/output/total), cost at $3/1M tokens. Total platform cost. Projected monthly at 22 working days.
+11. **Failure Root Cause Analysis** – Numbered list of every error/failure with: Span ID, Kind, Agent, Session, Error Message, Root Cause Hypothesis, Recommended Fix.
+12. **Performance Baseline** – Compute p50 and p99 latency across all LLM calls. Identify any calls > 2× the p50 as outliers. Note if any retry patterns exist in tool calls.
+13. **Action Items** – Numbered list of specific, prioritised engineering tasks (P0/P1/P2). Each must cite the exact metric or span that motivates it.
+14. **Appendix: Raw Metric Dump** – Key aggregate numbers in a code block for easy copy-paste into monitoring systems.
+
+Formatting rules:
+- Use Markdown tables for all structured data
+- Use ✅ 🟡 🔴 status indicators throughout
+- Exact numbers everywhere — no rounding unless specified
+- Technical precision throughout — no business language
+- Do NOT include any preamble before the first heading.
+- Total length: aim for 1200–1800 words of substance.`;
 9. **Failure Root Cause Analysis** – List all failed/blocked spans with reason, agent, session, and recommended remediation.
 10. **Action Items** – Numbered list of specific engineering tasks to improve reliability, latency, and guardrail coverage.
 
@@ -286,7 +316,7 @@ export async function generateReport(st, mode = 'business') {
         { role: 'user',    content: userMsg },
       ],
       temperature:            0.3,
-      max_completion_tokens:  isTechnical ? 4000 : 3000,
+      max_completion_tokens:  isTechnical ? 6000 : 5000,
     }),
   });
 
