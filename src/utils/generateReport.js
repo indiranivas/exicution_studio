@@ -134,11 +134,6 @@ Formatting rules:
 - Technical precision throughout — no business language
 - Do NOT include any preamble before the first heading.
 - Total length: aim for 1200–1800 words of substance.`;
-9. **Failure Root Cause Analysis** – List all failed/blocked spans with reason, agent, session, and recommended remediation.
-10. **Action Items** – Numbered list of specific engineering tasks to improve reliability, latency, and guardrail coverage.
-
-Use precise technical language throughout. Include exact numbers. Do NOT simplify or abstract.
-Do NOT include any preamble before the first heading.`;
 
 /** Build a richer technical snapshot with spans, guardrails, LLM calls, tool calls */
 function buildTechnicalSnapshot(st) {
