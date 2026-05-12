@@ -57,17 +57,17 @@ export default function PageAgentFleet({ st }) {
 
       {selectedAgent && selectedAgent._deployed && (
         <Panel
-          title={`Live MELT Telemetry — ${selectedAgent.name}`}
+          title={`MELT Telemetry — ${selectedAgent.name}`}
           right={
             <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto' }}>
-              <span style={{ fontFamily:mono, fontSize:9, padding:'2px 8px', borderRadius:2, background:C.cyBg, color:C.cy, border:'1px solid rgba(6,182,212,.3)' }}>● LIVE</span>
+              <span style={{ fontFamily:mono, fontSize:9, padding:'2px 8px', borderRadius:2, background:'rgba(34,197,94,.08)', color:C.gr, border:'1px solid rgba(34,197,94,.25)' }}>● Real data</span>
               <span style={{ fontFamily:mono, fontSize:10, color:C.mu }}>{selectedAgent._melt.length} layers · 40 fields · {selectedAgent._tools.length} tools</span>
               <button onClick={() => setSelectedId(null)} style={{ background:'transparent', border:'none', color:C.mu, cursor:'pointer', fontSize:14, padding:'0 4px', marginLeft:4 }}>✕</button>
             </div>
           }
         >
           <div style={{ padding:'0 16px 16px' }}>
-            <MeltTelemetryPanel agent={selectedAgent} />
+            <MeltTelemetryPanel agent={selectedAgent} st={st} />
           </div>
         </Panel>
       )}

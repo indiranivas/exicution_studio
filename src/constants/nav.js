@@ -23,6 +23,10 @@ export const BREADCRUMB = {
   alerts:'Alerts', telemetry:'Telemetry', failures:'Failure Explorer',
   confidence:'Confidence', learning:'Learning Log', handoffs:'Human Handoffs',
   cost:'Cost & Tokens', settings:'Settings',
+  'l2o-pipeline':   'L2O → Pipeline',
+  'l2o-traces':     'L2O → Trace Explorer',
+  'l2o-guardrails': 'L2O → Guardrails',
+  'l2o-feedback':   'L2O → AI Feedback',
 };
 
 export const PAGE_TITLE = {
@@ -30,4 +34,8 @@ export const PAGE_TITLE = {
   alerts:'Alerts', telemetry:'Telemetry', failures:'Failure Explorer',
   confidence:'Confidence', learning:'Learning Log', handoffs:'Human Handoffs',
   cost:'Cost & Tokens', settings:'Settings',
+  'l2o-pipeline':   'Lead → Order Pipeline',
+  'l2o-traces':     'Trace Explorer',
+  'l2o-guardrails': 'Guardrails & Trust',
+  'l2o-feedback':   'AI Feedback & Quality',
 };

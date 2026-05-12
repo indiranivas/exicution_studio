@@ -47,7 +47,7 @@ export default function PageTelemetry({ st }) {
         {/* Telemetry body */}
         <div style={{ padding:'16px' }}>
           {selAgent
-            ? <AgentTelemetryView agent={selAgent} key={selAgent.id} />
+            ? <AgentTelemetryView agent={selAgent} st={st} key={selAgent.id} />
             : <div style={{ textAlign:'center', padding:'60px 0', fontFamily:mono, fontSize:12, color:C.dm }}>Select an agent above to view its MELT telemetry</div>
           }
         </div>

@@ -1,16 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { C, mono, sans } from './constants/palette.js';
 import { NAV, BREADCRUMB, PAGE_TITLE } from './constants/nav.js';
-import { STATUSES } from './constants/agentDefs.js';
-import {
-  makeAgents, makeMetrics, makeLogLine, makeEvent,
-  makeHandoff, makeThroughput, makeFailDist, makeConfByType,
-  rnd, pick, fmtTime, fmtMs,
-} from './utils/dataHelpers.js';
+import { fmtTime } from './utils/dataHelpers.js';
+import { parseL2OData } from './utils/l2oAdapter.js';
+import { enrichWithLLM } from './utils/llmEnrich.js';
+import L2O_RAW from './data/l2o_rows.json';
+import DataUploadModal, { loadSavedRows, clearSavedRows } from './components/DataUploadModal.jsx';
+
+/* Parse real data — from localStorage upload or bundled sample */
+function initL2O() {
+  const saved = loadSavedRows();
+  return saved ? parseL2OData(saved) : parseL2OData(L2O_RAW.rows);
+}
+const SAMPLE_FILE_NAME = 'sample · lead_to_order_observability_rows.json';
 
 import Logo from './components/Logo.jsx';
 import DeployModal from './components/DeployModal.jsx';
+import ExportReportModal from './components/ExportReportModal.jsx';
 import { LearningPanel } from './components/panels.jsx';
+import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 
 // Technical pages
 import PageOverview        from './pages/PageOverview.jsx';
@@ -29,8 +37,27 @@ import PageBizOverview     from './pages/business/PageBizOverview.jsx';
 import PageBizPerformance  from './pages/business/PageBizPerformance.jsx';
 import PageBizCost         from './pages/business/PageBizCost.jsx';
 import PageBizApprovals    from './pages/business/PageBizApprovals.jsx';
+import PageBizCompliance   from './pages/business/PageBizCompliance.jsx';
+import PageBizTeamImpact   from './pages/business/PageBizTeamImpact.jsx';
+
+// L2O pages
+import PageL2OPipeline     from './pages/l2o/PageL2OPipeline.jsx';
+import PageL2OTraceExplorer from './pages/l2o/PageL2OTraceExplorer.jsx';
+import PageL2OGuardrails   from './pages/l2o/PageL2OGuardrails.jsx';
+import PageL2OFeedback     from './pages/l2o/PageL2OFeedback.jsx';
 
 const ACCENT = '#009ADA';
+
+/* ── L2O nav section (injected into Technical view) ── */
+const L2O_NAV_SECTION = {
+  section: 'Lead-to-Order (Live)',
+  items: [
+    { id: 'l2o-pipeline',  icon: '⟶', label: 'L2O Pipeline'    },
+    { id: 'l2o-traces',   icon: '◎', label: 'Trace Explorer'   },
+    { id: 'l2o-guardrails',icon: '⊛', label: 'Guardrails'      },
+    { id: 'l2o-feedback', icon: '◈', label: 'AI Feedback'      },
+  ],
+};
 
 /* ── Business nav ── */
 const BIZ_NAV = [
@@ -40,13 +67,19 @@ const BIZ_NAV = [
     { id: 'biz-cost',       icon: '⊘', label: 'Cost & ROI'        },
     { id: 'biz-approvals',  icon: '⤵', label: 'Approvals',  count: () => 6, alert: true },
   ]},
+  { section: 'Operations & Trust', items: [
+    { id: 'biz-team',       icon: '◫', label: 'Team Impact'        },
+    { id: 'biz-compliance', icon: '⊟', label: 'Compliance & Audit' },
+  ]},
 ];
 
 const BIZ_TITLE = {
-  'biz-overview':  'Executive Summary',
-  'biz-perf':      'Performance',
-  'biz-cost':      'Cost & ROI',
-  'biz-approvals': 'Approvals',
+  'biz-overview':   'Executive Summary',
+  'biz-perf':       'Performance',
+  'biz-cost':       'Cost & ROI',
+  'biz-approvals':  'Approvals',
+  'biz-team':       'Team Impact',
+  'biz-compliance': 'Compliance & Audit',
 };
 
 /* ── View toggle button ── */
@@ -78,92 +111,111 @@ function ViewToggle({ view, onChange }) {
 
 export default function App() {
   const [page, setPage]               = useState('overview');
-  const [view, setView]               = useState('technical');  // 'business' | 'technical'
-  const [agents, setAgents]           = useState(makeAgents);
-  const [metrics, setMetrics]         = useState(makeMetrics);
-  const [logs, setLogs]               = useState(() => Array.from({ length: 8 }, makeLogLine));
-  const [events, setEvents]           = useState(() => Array.from({ length: 6 }, makeEvent));
-  const [throughput, setThroughput]   = useState(makeThroughput);
-  const [failDist]                    = useState(makeFailDist);
-  const [confByType, setConfByType]   = useState(makeConfByType);
-  const [handoffs]                    = useState(() => Array.from({ length: 12 }, makeHandoff));
-  const [tick, setTick]               = useState(0);
+  const [view, setView]               = useState('technical');
+  const [l2oData, setL2oData]         = useState(initL2O);
+  const [enriched, setEnriched]       = useState(null);    // LLM-computed fields
+  const [enrichLoading, setEnrichLoading] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState('');  // status message
   const [showDeploy, setShowDeploy]   = useState(false);
+  const [showReport, setShowReport]   = useState(false);
   const [theme, setTheme]             = useState('light');
   const [clock, setClock]             = useState(fmtTime);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState(() => loadSavedRows() ? 'uploaded data' : null);
+  const [showUpload, setShowUpload]   = useState(false);
 
-  // Switch to correct default page when view changes
+  /* Run LLM enrichment whenever l2oData changes */
+  const runEnrichment = useCallback(async (data) => {
+    setEnrichLoading(true);
+    setEnrichProgress('Enriching with AI…');
+    try {
+      const result = await enrichWithLLM(data, (step, total, label) => {
+        setEnrichProgress(`[${step}/${total}] ${label}`);
+      });
+      setEnriched(result);
+    } catch (err) {
+      console.warn('LLM enrichment failed:', err.message);
+      setEnriched(null);
+    } finally {
+      setEnrichLoading(false);
+      setEnrichProgress('');
+    }
+  }, []);
+
+  /* Enrich on first load */
+  useEffect(() => { runEnrichment(l2oData); }, []); // eslint-disable-line
+
+  // Hash-based routing — sync page ↔ URL so back/forward works
   useEffect(() => {
-    if (view === 'business') setPage('biz-overview');
-    else setPage('overview');
-  }, [view]);
+    const onHashChange = () => {
+      const h = window.location.hash.slice(1);
+      if (!h) return;
+      if (h.startsWith('biz-')) setView('business');
+      else setView('technical');
+      setPage(h);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    const initial = window.location.hash.slice(1);
+    if (initial) {
+      if (initial.startsWith('biz-')) setView('business');
+      setPage(initial);
+    }
+    // Close drawer on any hash navigation
+    window.addEventListener('hashchange', () => setSidebarOpen(false));
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => { window.location.hash = page; }, [page]);
 
   useEffect(() => { document.documentElement.className = theme === 'light' ? 'light' : ''; }, [theme]);
   useEffect(() => { const id = setInterval(() => setClock(fmtTime()), 1000); return () => clearInterval(id); }, []);
 
-  const handleDeployAgent = useCallback((cfg) => {
-    const typeMap = { BRAND_AMBASSADOR:'support', ANALYST:'analytics', ADVISOR:'report_gen', CONCIERGE:'support', ENGINEER:'data_enrich', EXECUTIVE:'report_gen' };
-    const newAgent = {
-      id: `agt_${Math.random().toString(16).slice(2,6)}`,
-      name: cfg.name, model: cfg.model,
-      type: typeMap[cfg.persona] || 'analytics',
-      status: 'running', step: 1, totalSteps: Math.max(7, cfg.max_iterations),
-      conf: Math.min(.99, cfg.conf_min + 0.08 + Math.random() * .10),
-      tasks: 0, errors: 0, latency: rnd(300, 1400), tokenCost: 0,
-      _deployed: true, _persona: cfg.persona,
-      _tools: cfg.tools, _melt: cfg.melt_layers, _conf_min: cfg.conf_min,
-    };
-    setAgents(prev => [...prev, newAgent]);
-    setEvents(prev => [{
-      color: C.gr, title: `${cfg.name} deployed`,
-      desc: `${cfg.persona} · ${cfg.model} · ${cfg.tools.length} tools · MELT ${cfg.melt_layers.length} layers`,
-      ts: fmtMs(), id: Math.random(),
-    }, ...prev.slice(0, 9)]);
-    setPage('fleet');
-    setView('technical');
-  }, []);
+  /* ── Handle new data upload ── */
+  const handleDataUpload = useCallback((parsed) => {
+    const src = parsed || parseL2OData(L2O_RAW.rows);
+    setL2oData(src);
+    if (!parsed) {
+      clearSavedRows();
+      setUploadedFileName(null);
+    } else {
+      setUploadedFileName('uploaded data');
+    }
+    setPage('overview');
+    runEnrichment(src);   // re-enrich with new data
+  }, [runEnrichment]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      setTick(t => t + 1);
-      setAgents(prev => {
-        const idx = rnd(1, prev.length);
-        return prev.map((a, i) => i === idx ? {
-          ...a,
-          status: Math.random() > .95 ? pick(STATUSES) : a.status,
-          step: Math.min(a.totalSteps, a.step + (Math.random() > .85 ? 1 : 0)),
-          conf: Math.max(.05, Math.min(.99, a.conf + (Math.random() - .5) * .015)),
-          tasks: a.tasks + (Math.random() > .7 ? 1 : 0),
-          errors: a.errors + (Math.random() > .93 ? 1 : 0),
-        } : a);
-      });
-      if (Math.random() > .4) setLogs(prev => [makeLogLine(), ...prev.slice(0, 30)]);
-      if (Math.random() > .8)  setEvents(prev => [makeEvent(), ...prev.slice(0, 9)]);
-      setMetrics(prev => ({
-        tasks: prev.tasks + rnd(0, 1),
-        success: Math.max(88, Math.min(99, +(prev.success + (Math.random() - .5) * .06).toFixed(1))),
-        latency: Math.max(1, +(prev.latency + (Math.random() - .5) * .05).toFixed(1)),
-        handoffs: Math.max(0, prev.handoffs + (Math.random() > .9 ? 1 : Math.random() > .95 ? -1 : 0)),
-        cost: +(prev.cost + Math.random() * .008).toFixed(2),
-        toolCalls: prev.toolCalls + rnd(0, 2),
-      }));
-      setConfByType(prev => {
-        if (tick % 8 !== 0) return prev;
-        const next = { ...prev };
-        const k = pick(Object.keys(next));
-        next[k] = Math.max(.1, Math.min(.98, next[k] + (Math.random() - .5) * .025));
-        return next;
-      });
-      setThroughput(prev => {
-        const n = [...prev];
-        n[n.length - 1] = Math.max(5, n[n.length - 1] + rnd(-2, 3));
-        return n;
-      });
-    }, 5000);
-    return () => clearInterval(id);
-  }, [tick]);
-
-  const st = { agents, metrics, logs, events, throughput, failDist, confByType, handoffs };
+  const st = {
+    // All from real data only
+    agents:      l2oData.agents,
+    metrics:     l2oData.metrics,
+    logs:        l2oData.logs,
+    events:      l2oData.events,
+    handoffs:    l2oData.handoffs,
+    // Derived analytics (math, no fabrication)
+    throughput:  l2oData.throughputSeries,
+    failDist:    l2oData.failDist,
+    confByType:  l2oData.confByType,
+    heatmapData: l2oData.heatmapData,
+    // L2O-specific
+    sessions:    l2oData.sessions,
+    guardrails:  l2oData.guardrails,
+    toolCalls:   l2oData.toolCalls,
+    llmCalls:    l2oData.llmCalls,
+    feedback:    l2oData.feedback,
+    pipeline:    l2oData.pipeline,
+    intentDist:  l2oData.intentDist,
+    modelDist:   l2oData.modelDist,
+    spans:       l2oData.spans,
+    // LLM-enriched fields (null while loading)
+    agentRiskScores:   enriched?.agentRiskScores   ?? null,
+    sessionInsights:   enriched?.sessionInsights   ?? null,
+    alertItems:        enriched?.alertItems        ?? null,
+    executiveBullets:  enriched?.executiveBullets  ?? null,
+    taskQueueItems:    enriched?.taskQueueItems    ?? null,
+    // Enrichment status
+    enrichLoading,
+    enrichProgress,
+  };
 
   /* ── Page routing ── */
   const pageEl = (() => {
@@ -172,64 +224,88 @@ export default function App() {
         case 'biz-overview':  return <PageBizOverview st={st} />;
         case 'biz-perf':      return <PageBizPerformance st={st} />;
         case 'biz-cost':      return <PageBizCost st={st} />;
-        case 'biz-approvals': return <PageBizApprovals st={st} />;
+        case 'biz-approvals':  return <PageBizApprovals st={st} />;
+      case 'biz-team':       return <PageBizTeamImpact st={st} />;
+      case 'biz-compliance': return <PageBizCompliance st={st} />;
         default:              return <PageBizOverview st={st} />;
       }
     }
     switch (page) {
       case 'overview':   return <PageOverview st={st} />;
       case 'fleet':      return <PageAgentFleet st={st} />;
-      case 'queue':      return <PageTaskQueue />;
-      case 'alerts':     return <PageAlerts />;
+      case 'queue':      return <PageTaskQueue st={st} />;
+      case 'alerts':     return <PageAlerts st={st} />;
       case 'telemetry':  return <PageTelemetry st={st} />;
-      case 'failures':   return <PageFailureExplorer />;
+      case 'failures':   return <PageFailureExplorer st={st} />;
       case 'confidence': return <PageConfidence st={st} />;
-      case 'learning':   return <LearningPanel />;
+      case 'learning':   return <LearningPanel st={st} />;
       case 'handoffs':   return <PageHandoffs st={st} />;
       case 'cost':       return <PageCostTokens st={st} />;
       case 'settings':   return <PageSettings />;
+      case 'l2o-pipeline':   return <PageL2OPipeline st={st} />;
+      case 'l2o-traces':     return <PageL2OTraceExplorer st={st} />;
+      case 'l2o-guardrails': return <PageL2OGuardrails st={st} />;
+      case 'l2o-feedback':   return <PageL2OFeedback st={st} />;
       default:           return <div style={{ color:C.mu, fontFamily:mono, fontSize:12 }}>Page not found</div>;
     }
   })();
 
-  const activeNav  = view === 'business' ? BIZ_NAV : NAV;
+  const activeNav  = view === 'business' ? BIZ_NAV
+    : [...NAV, L2O_NAV_SECTION];
   const pageTitle  = view === 'business' ? (BIZ_TITLE[page] || 'Executive Summary') : (PAGE_TITLE[page] || page);
   const breadcrumb = view === 'business' ? (BIZ_TITLE[page] || 'Executive Summary') : (BREADCRUMB[page] || page);
 
   const isBiz = view === 'business';
 
   return (
-    <div style={{ display:'grid', gridTemplateColumns:'220px 1fr', gridTemplateRows:'48px 1fr', minHeight:'100vh', background:C.bg, fontFamily:sans, color:C.tx, fontSize:13 }}>
+    <div className="app-shell" style={{ background:C.bg, fontFamily:sans, color:C.tx, fontSize:13 }}>
 
       {/* ── TOPBAR ── */}
-      <div style={{ gridColumn:'1/-1', background:C.sf, borderBottom:`1px solid ${C.b}`, display:'flex', alignItems:'center', padding:'0 20px', gap:14, position:'sticky', top:0, zIndex:100 }}>
+      <div style={{ gridColumn:'1/-1', background:C.sf, borderBottom:`1px solid ${C.b}`, display:'flex', alignItems:'center', padding:'0 16px', gap:10, position:'sticky', top:0, zIndex:100, height:'var(--topbar-h)' }}>
+        {/* Hamburger — mobile only */}
+        <button
+          onClick={() => setSidebarOpen(o => !o)}
+          aria-label="Toggle menu"
+          style={{ display:'none', flexDirection:'column', gap:4, padding:'6px', background:'transparent', border:'none', cursor:'pointer', flexShrink:0 }}
+          className="hamburger"
+        >
+          <span style={{ display:'block', width:18, height:2, background:C.mu, borderRadius:1, transition:'all .2s', transform: sidebarOpen ? 'rotate(45deg) translate(4px,4px)' : 'none' }} />
+          <span style={{ display:'block', width:18, height:2, background:C.mu, borderRadius:1, transition:'all .2s', opacity: sidebarOpen ? 0 : 1 }} />
+          <span style={{ display:'block', width:18, height:2, background:C.mu, borderRadius:1, transition:'all .2s', transform: sidebarOpen ? 'rotate(-45deg) translate(4px,-4px)' : 'none' }} />
+        </button>
+
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <Logo />
           <div style={{ width:1, height:20, background:C.b2, flexShrink:0 }} />
           <div style={{ width:6, height:6, borderRadius:'50%', background:C.gr, boxShadow:`0 0 7px ${C.gr}`, animation:'pulse 2s ease-in-out infinite', flexShrink:0 }} />
         </div>
-        <div style={{ width:1, height:20, background:C.b2 }} />
-        <span style={{ fontFamily:mono, fontSize:12, color:C.mu }}>{breadcrumb}</span>
+        <div className="topbar-breadcrumb-sep" style={{ width:1, height:20, background:C.b2, flexShrink:0 }} />
+        <span className="topbar-breadcrumb-label" style={{ fontFamily:mono, fontSize:12, color:C.mu, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0 }}>{breadcrumb}</span>
 
-        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:12 }}>
-          {/* View toggle — central UI element */}
-          <ViewToggle view={view} onChange={v => setView(v)} />
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+          {/* View toggle */}
+          <ViewToggle view={view} onChange={v => { setView(v); setPage(v === 'business' ? 'biz-overview' : 'overview'); setSidebarOpen(false); }} />
 
-          <div style={{ width:1, height:20, background:C.b2 }} />
-          <span style={{ fontFamily:mono, fontSize:11, padding:'3px 10px', borderRadius:2, border:`1px solid ${C.b2}`, color:C.mu }}>prod-us-east-1</span>
-          <span style={{ fontFamily:mono, fontSize:11, padding:'3px 10px', borderRadius:2, border:`1px solid ${C.grBd}`, color:C.gr, background:C.grBg }}>● LIVE</span>
-          <span style={{ fontFamily:mono, fontSize:11, color:C.mu }}>{clock}</span>
+          <div className="topbar-env-badges" style={{ alignItems:'center', gap:8 }}>
+            <div style={{ width:1, height:20, background:C.b2 }} />
+            <span style={{ fontFamily:mono, fontSize:11, padding:'3px 10px', borderRadius:2, border:`1px solid ${C.b2}`, color:C.mu }}>prod-us-east-1</span>
+            <span style={{ fontFamily:mono, fontSize:11, padding:'3px 10px', borderRadius:2, border:`1px solid ${C.grBd}`, color:C.gr, background:C.grBg }}>● LIVE</span>
+            <span style={{ fontFamily:mono, fontSize:11, color:C.mu }}>{clock}</span>
+          </div>
           <button
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            style={{ display:'flex', alignItems:'center', gap:6, fontFamily:mono, fontSize:11, padding:'4px 12px', borderRadius:3, border:`1px solid ${C.b2}`, background:'transparent', color:C.mu, cursor:'pointer', transition:'all .2s', flexShrink:0 }}
+            style={{ display:'flex', alignItems:'center', gap:6, fontFamily:mono, fontSize:11, padding:'4px 10px', borderRadius:3, border:`1px solid ${C.b2}`, background:'transparent', color:C.mu, cursor:'pointer', transition:'all .2s', flexShrink:0 }}
           >
-            {theme === 'dark' ? '☀︎ Light' : '☾ Dark'}
+            {theme === 'dark' ? '☀︎' : '☾'}
           </button>
         </div>
       </div>
 
+      {/* Overlay behind drawer on mobile */}
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+
       {/* ── SIDEBAR ── */}
-      <nav style={{ background:C.sf, borderRight:`1px solid ${C.b}`, padding:'16px 0', display:'flex', flexDirection:'column', position:'sticky', top:48, height:'calc(100vh - 48px)', overflowY:'auto' }}>
+      <nav className={`sidebar-drawer${sidebarOpen ? ' open' : ''}`} style={{ background:C.sf, borderRight:`1px solid ${C.b}`, padding:'16px 0', display:'flex', flexDirection:'column' }}>
         {/* View label in sidebar */}
         <div style={{ margin:'0 12px 12px', padding:'8px 12px', borderRadius:4, background: isBiz ? 'rgba(0,154,218,.1)' : 'rgba(167,139,250,.1)', border:`1px solid ${isBiz ? 'rgba(0,154,218,.25)' : 'rgba(167,139,250,.25)'}` }}>
           <div style={{ fontFamily:mono, fontSize:9, letterSpacing:'.08em', textTransform:'uppercase', color: isBiz ? ACCENT : C.pu, marginBottom:2 }}>{isBiz ? 'Business View' : 'Technical View'}</div>
@@ -240,7 +316,7 @@ export default function App() {
           <div key={section.section}>
             <div style={{ fontFamily:mono, fontSize:10, letterSpacing:'.1em', color:C.dm, padding:'12px 20px 6px', textTransform:'uppercase' }}>{section.section}</div>
             {section.items.map(item => (
-              <div key={item.id} onClick={() => setPage(item.id)} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 20px', fontSize:13, color:page===item.id?C.tx:C.mu, cursor:'pointer', background:page===item.id?'rgba(255,255,255,.05)':'transparent', borderLeft:`2px solid ${page===item.id ? (isBiz ? ACCENT : C.bl) : 'transparent'}`, transition:'all .15s' }}>
+              <div key={item.id} onClick={() => { setPage(item.id); setSidebarOpen(false); }} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 20px', fontSize:13, color:page===item.id?C.tx:C.mu, cursor:'pointer', background:page===item.id?'rgba(255,255,255,.05)':'transparent', borderLeft:`2px solid ${page===item.id ? (isBiz ? ACCENT : C.bl) : 'transparent'}`, transition:'all .15s' }}>
                 <span style={{ width:16, textAlign:'center', fontSize:14, opacity:.7 }}>{item.icon}</span>
                 {item.label}
                 {item.count && (
@@ -253,39 +329,76 @@ export default function App() {
           </div>
         ))}
 
-        <div style={{ marginTop:'auto', padding:'16px 20px', borderTop:`1px solid ${C.b}`, fontFamily:mono, fontSize:11, color:C.dm, lineHeight:1.7 }}>
-          v2.4.1 · build 20f3a91<br />Last deploy: 2h ago
+        <div style={{ marginTop:'auto', borderTop:`1px solid ${C.b}` }}>
+          {/* Upload data button */}
+          <button
+            onClick={() => setShowUpload(true)}
+            style={{
+              display:'flex', alignItems:'center', gap:8, width:'100%',
+              padding:'12px 20px', background:'transparent', border:'none',
+              borderBottom:`1px solid ${C.b}`, cursor:'pointer',
+              fontFamily:mono, fontSize:11, color: uploadedFileName ? ACCENT : C.mu,
+              transition:'all .15s',
+            }}
+          >
+            <span style={{ fontSize:13 }}>⬆</span>
+            <span style={{ flex:1, textAlign:'left', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {uploadedFileName ? uploadedFileName : 'Upload Observability Data'}
+            </span>
+            {uploadedFileName && <span style={{ fontSize:9, opacity:.6 }}>●</span>}
+          </button>
+          <div style={{ padding:'12px 20px', fontFamily:mono, fontSize:11, color:C.dm, lineHeight:1.7 }}>
+            {st.agents.map(a => `${a.name} v${a.version}`).join(' · ')}<br />
+            {st.sessions.length} sessions · {st.metrics.sessionCount} total
+          </div>
         </div>
       </nav>
 
       {/* ── MAIN ── */}
-      <main style={{ padding:24, overflowY:'auto' }}>
-        <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:24 }}>
+      <main className="app-main" style={{ padding:24, overflowY:'auto' }}>
+        <ErrorBoundary key={page}>
+        <div className="page-header">
           <div>
             <div style={{ fontSize:20, fontWeight:300, letterSpacing:'-.01em' }}>{pageTitle}</div>
             <div style={{ color:C.mu, fontSize:12, marginTop:4, fontFamily:mono }}>
               {isBiz
-                ? `LevelShift AI Platform · ${agents.length} agents · ${agents.filter(a=>a.status==='running').length} running`
-                : page === 'overview' ? `agent_fleet · ${agents.length} agents (1 lead + ${agents.length-1} workers) · refreshed every 5s`
-                : page === 'fleet'    ? `${agents.filter(a=>a.status==='running').length} running · ${agents.filter(a=>a.status==='failed').length} failed`
+                ? `LevelShift AI Platform · ${st.agents.length} agents · ${st.agents.filter(a=>a.status==='running').length} running`
+                : page === 'overview' ? `agent_fleet · ${st.agents.length} agents · ${st.agents.filter(a=>a.status==='running').length} running · real data`
+                : page === 'fleet'    ? `${st.agents.filter(a=>a.status==='running').length} running · ${st.agents.filter(a=>a.status==='failed').length} failed`
                 : `${new Date().toLocaleDateString()} · prod-us-east-1`}
             </div>
           </div>
-          <div style={{ display:'flex', gap:8 }}>
+          <div className="page-header-actions">
             <button style={{ fontFamily:mono, fontSize:11, padding:'6px 14px', borderRadius:3, border:`1px solid ${C.b2}`, background:'transparent', color:C.mu, cursor:'pointer' }}>↺ Refresh</button>
-            {!isBiz && <button style={{ fontFamily:mono, fontSize:11, padding:'6px 14px', borderRadius:3, border:`1px solid ${C.b2}`, background:'transparent', color:C.mu, cursor:'pointer' }}>⬇ Export</button>}
+            {!isBiz && <button onClick={() => setShowReport(true)} style={{ fontFamily:mono, fontSize:11, padding:'6px 14px', borderRadius:3, border:`1px solid ${C.b2}`, background:'transparent', color:C.mu, cursor:'pointer' }}>⬇ Export</button>}
             {isBiz
-              ? <button style={{ fontFamily:mono, fontSize:11, padding:'6px 16px', borderRadius:3, border:`1px solid ${ACCENT}44`, background:`rgba(0,154,218,.1)`, color:ACCENT, cursor:'pointer' }}>⬇ Export Report</button>
+              ? <button onClick={() => setShowReport(true)} style={{ fontFamily:mono, fontSize:11, padding:'6px 16px', borderRadius:3, border:`1px solid ${ACCENT}44`, background:`rgba(0,154,218,.1)`, color:ACCENT, cursor:'pointer' }}>⬇ Export Report</button>
               : <button onClick={() => page !== 'settings' && setShowDeploy(true)} style={{ fontFamily:mono, fontSize:11, padding:'6px 14px', borderRadius:3, border:`1px solid ${C.blBd}`, background:C.blBg, color:C.bl, cursor:'pointer' }}>
                   {page === 'settings' ? '💾 Save' : '+ Deploy Agent'}
                 </button>
             }
           </div>
         </div>
-        {pageEl}
+          {pageEl}
+        </ErrorBoundary>
       </main>
 
-      {showDeploy && <DeployModal onClose={() => setShowDeploy(false)} onDeploy={handleDeployAgent} />}
+      {showDeploy && <DeployModal onClose={() => setShowDeploy(false)} onDeploy={() => {}} />}
+      {showReport && <ExportReportModal st={st} mode={isBiz ? 'business' : 'technical'} onClose={() => setShowReport(false)} />}
+      {showUpload && (
+        <DataUploadModal
+          currentFileName={uploadedFileName || null}
+          onLoad={(parsed) => { handleDataUpload(parsed); }}
+          onClose={() => setShowUpload(false)}
+        />
+      )}
+      {/* LLM enrichment progress indicator */}
+      {enrichLoading && (
+        <div style={{ position:'fixed', bottom:20, right:20, zIndex:999, background:C.sf, border:`1px solid ${C.b2}`, borderRadius:8, padding:'10px 16px', display:'flex', alignItems:'center', gap:10, fontFamily:mono, fontSize:11, color:C.mu, boxShadow:'0 4px 20px rgba(0,0,0,.15)' }}>
+          <span style={{ color:'#009ADA', animation:'pulse 1s ease-in-out infinite' }}>⟳</span>
+          {enrichProgress || 'AI enrichment running…'}
+        </div>
+      )}
     </div>
   );
 }

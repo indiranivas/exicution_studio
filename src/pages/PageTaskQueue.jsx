@@ -1,44 +1,83 @@
-import { useMemo } from 'react';
 import { C, mono, sans } from '../constants/palette.js';
-import { AGENT_DEFS } from '../constants/agentDefs.js';
-import { rnd, pick } from '../utils/dataHelpers.js';
-import { MetricTile, Panel, Pill, Th, Td } from '../components/ui.jsx';
+import { MetricTile, Panel, Pill } from '../components/ui.jsx';
 
-export default function PageTaskQueue() {
-  const tasks = useMemo(() => Array.from({ length:22 }, (_, i) => ({
-    id: `TASK-${(4000+i).toString(16).toUpperCase()}`,
-    agent: pick(AGENT_DEFS).name,
-    type: pick(['order_processing','report_gen','email_draft','data_enrich','invoice_parse']).replace(/_/g,' '),
-    priority: pick(['high','normal','low']),
-    status: pick(['queued','running','waiting']),
-    eta: `${rnd(5,180)}s`,
-    created: `${rnd(1,45)}m ago`,
-    steps: `${rnd(0,5)}/7`,
-  })), []);
-  const pc = { high:C.re, normal:C.am, low:C.mu };
+const PRIORITY_COLOR = { high: C.re, medium: C.am, low: C.mu };
+
+export default function PageTaskQueue({ st = {} }) {
+  const { taskQueueItems = null, enrichLoading, enrichProgress, sessions = [] } = st;
+
+  if (enrichLoading) {
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+        <div style={{ padding:'40px', textAlign:'center', fontFamily:mono, fontSize:12, color:C.mu }}>
+          <div style={{ fontSize:24, marginBottom:12 }}>⟳</div>
+          {enrichProgress || 'AI is inferring task queue from session data…'}
+        </div>
+      </div>
+    );
+  }
+
+  if (!taskQueueItems || taskQueueItems.length === 0) {
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+        <div style={{ padding:'32px', textAlign:'center', fontFamily:mono, fontSize:12, color:C.mu, background:C.sf, borderRadius:8, border:`1px solid ${C.b2}` }}>
+          <div style={{ fontSize:20, marginBottom:8 }}>◎</div>
+          No pending tasks — all sessions in the current dataset are completed.<br />
+          <span style={{ color:C.dm }}>Upload a dataset with in-progress sessions to populate this queue.</span>
+        </div>
+        <Panel title="Session Outcomes" subtitle={`${sessions.length} sessions in dataset`}>
+          <div style={{ padding:'0 16px' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead><tr>{['Session','Agent','Status','Msgs','Duration'].map(h => (
+                <th key={h} style={{ fontFamily:mono, fontSize:10, color:C.dm, textAlign:'left', padding:'6px 10px', textTransform:'uppercase', letterSpacing:'.06em', borderBottom:`1px solid ${C.b2}` }}>{h}</th>
+              ))}</tr></thead>
+              <tbody>
+                {sessions.map(s => (
+                  <tr key={s.id} style={{ borderBottom:`1px solid ${C.b2}` }}>
+                    <td style={{ fontFamily:mono, fontSize:11, padding:'8px 10px', color:'#009ADA' }}>{s.id}</td>
+                    <td style={{ fontFamily:sans, fontSize:12, padding:'8px 10px', color:C.mu }}>{s.agentDevName?.replace('LeadToOrder','').replace('Assistant',' Assist').replace('Specialist',' Specialist')}</td>
+                    <td style={{ padding:'8px 10px' }}><Pill status={s.deflection === 'Resolved' ? 'complete' : s.escalation === 'Escalated' ? 'failed' : 'running'} /></td>
+                    <td style={{ fontFamily:mono, fontSize:11, padding:'8px 10px', color:C.mu }}>{s.messageCount}</td>
+                    <td style={{ fontFamily:mono, fontSize:11, padding:'8px 10px', color:C.dm }}>{s.durationMs ? `${Math.round(s.durationMs/1000)}s` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
+
   return (
     <div className="anim-in" style={{ display:'flex', flexDirection:'column', gap:16 }}>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
-        <MetricTile label="Queued"    value={tasks.filter(t=>t.status==='queued').length}  delta="waiting for slot"  dir="flat" accent="amber" />
-        <MetricTile label="Running"   value={tasks.filter(t=>t.status==='running').length} delta="currently active"  dir="up"   accent="green" />
-        <MetricTile label="Waiting"   value={tasks.filter(t=>t.status==='waiting').length} delta="blocked on I/O"    dir="flat" accent="blue" />
-        <MetricTile label="Avg wait"  value={`${rnd(8,30)}s`}                              delta="before execution"  dir="flat" accent="cyan" />
+        <MetricTile label="Inferred Tasks"  value={taskQueueItems.length}  delta="AI-inferred from sessions" dir="flat" accent="blue" />
+        <MetricTile label="High Priority"   value={taskQueueItems.filter(t=>t.priority==='high').length}   delta="requires immediate action" dir="down" accent="red" />
+        <MetricTile label="Medium"          value={taskQueueItems.filter(t=>t.priority==='medium').length} delta="standard follow-up"        dir="flat" accent="amber" />
+        <MetricTile label="Low"             value={taskQueueItems.filter(t=>t.priority==='low').length}    delta="when convenient"           dir="up"   accent="green" />
       </div>
-      <Panel title="Task queue" right={<span style={{ fontFamily:mono, fontSize:10, padding:'1px 8px', borderRadius:2, background:C.amBg, color:C.am, marginLeft:'auto' }}>Live</span>}>
+      <div style={{ background:'rgba(0,154,218,.06)', border:'1px solid rgba(0,154,218,.2)', borderRadius:6, padding:'10px 16px', fontFamily:mono, fontSize:11, color:'#009ADA' }}>
+        ⊛ These tasks were inferred by LLM from session outcomes — not raw records. Upload new data to refresh.
+      </div>
+      <Panel title="AI-Inferred Task Queue" subtitle="Follow-up tasks based on session outcomes">
         <div style={{ padding:'0 16px' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
-            <thead><tr>{['Task ID','Agent','Type','Priority','Status','Steps','ETA','Queued'].map(h=><Th key={h}>{h}</Th>)}</tr></thead>
+            <thead><tr>{['Title','Description','Priority','Assigned To','Session'].map(h => (
+              <th key={h} style={{ fontFamily:mono, fontSize:10, color:C.dm, textAlign:'left', padding:'6px 10px', textTransform:'uppercase', letterSpacing:'.06em', borderBottom:`1px solid ${C.b2}` }}>{h}</th>
+            ))}</tr></thead>
             <tbody>
-              {tasks.map(t => (
-                <tr key={t.id}>
-                  <Td style={{ fontFamily:mono, fontSize:11, color:C.bl }}>{t.id}</Td>
-                  <Td style={{ fontSize:12, fontFamily:sans }}>{t.agent}</Td>
-                  <Td style={{ fontFamily:mono, fontSize:10, color:C.mu }}>{t.type}</Td>
-                  <Td style={{ fontFamily:mono, fontSize:10, color:pc[t.priority] }}>{t.priority}</Td>
-                  <Td><Pill status={t.status} /></Td>
-                  <Td style={{ fontFamily:mono, fontSize:11 }}>{t.steps}</Td>
-                  <Td style={{ fontFamily:mono, fontSize:11, color:C.mu }}>{t.eta}</Td>
-                  <Td style={{ fontFamily:mono, fontSize:10, color:C.dm }}>{t.created}</Td>
+              {taskQueueItems.map((t, i) => (
+                <tr key={t.id || i} style={{ borderBottom:`1px solid ${C.b2}` }}>
+                  <td style={{ fontFamily:sans, fontSize:12, padding:'10px 10px', color:C.tx, fontWeight:500 }}>{t.title}</td>
+                  <td style={{ fontFamily:sans, fontSize:11, padding:'10px 10px', color:C.mu, maxWidth:280 }}>{t.description}</td>
+                  <td style={{ padding:'10px 10px' }}>
+                    <span style={{ fontFamily:mono, fontSize:10, padding:'2px 7px', borderRadius:3, background:(PRIORITY_COLOR[t.priority]||C.mu)+'22', color:PRIORITY_COLOR[t.priority]||C.mu }}>
+                      {t.priority}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily:mono, fontSize:11, padding:'10px 10px', color:'#009ADA' }}>{t.assignedTo}</td>
+                  <td style={{ fontFamily:mono, fontSize:10, padding:'10px 10px', color:C.dm }}>{t.relatedSessionId || '—'}</td>
                 </tr>
               ))}
             </tbody>

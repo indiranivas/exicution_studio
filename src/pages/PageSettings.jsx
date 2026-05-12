@@ -49,8 +49,8 @@ export default function PageSettings() {
           </div>
           <div style={{ background:C.sf2, borderRadius:3, padding:'12px 14px', fontFamily:mono, fontSize:11, color:C.mu, lineHeight:1.8 }}>
             Environment: <span style={{ color:C.tx }}>prod-us-east-1</span><br />
-            Version: <span style={{ color:C.tx }}>v2.4.1 · build 20f3a91</span><br />
-            Last deploy: <span style={{ color:C.tx }}>2h ago</span>
+            Data source: <span style={{ color:C.tx }}>Salesforce Data Cloud · L2O observability rows</span><br />
+            Platform: <span style={{ color:C.tx }}>LevelShift AgentOps</span>
           </div>
         </div>
       </Panel>

@@ -1,18 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { C, mono, sans } from '../../constants/palette.js';
-import { rnd } from '../../utils/dataHelpers.js';
 import { Panel } from '../../components/ui.jsx';
 
 const ACCENT = '#009ADA';
-
-const APPROVALS = [
-  { id:1,  type:'Order Amendment',     agent:'Order Processing AI',     summary:'Customer CX-9841 requests order #ORD-44821 increase from 50 to 200 units — exceeds auto-approve limit of 100',  urgency:'high',   time:'2m ago',   value:'$3,400' },
-  { id:2,  type:'Invoice Discrepancy', agent:'Invoice Parsing AI',      summary:'Invoice INV-2291 amount $12,840 does not match PO-8872 ($11,200). Difference $1,640 requires finance sign-off',  urgency:'high',   time:'8m ago',   value:'$1,640' },
-  { id:3,  type:'Email Communication', agent:'Email Drafting AI',       summary:'Proposed response to customer complaint includes a discount offer of 15% — agent confidence 0.62, below threshold', urgency:'medium', time:'22m ago',  value: null },
-  { id:4,  type:'Data Enrichment',     agent:'Data Enrichment AI',      summary:'7 account records have conflicting firmographic data. AI matched 3 candidates per record — needs human selection',  urgency:'medium', time:'41m ago',  value: null },
-  { id:5,  type:'Report Distribution', agent:'Report Generation AI',    summary:'Weekly KPI report flagged 2 anomalous metrics — AI paused distribution pending review of anomaly explanation',  urgency:'low',    time:'1h ago',   value: null },
-  { id:6,  type:'CRM Record Merge',    agent:'CRM Sync AI',             summary:'Detected potential duplicate accounts: Acme Corp (ID 4421) and Acme Corporation (ID 7892). Merge requires approval', urgency:'low',    time:'2h ago',   value: null },
-];
 
 const urgencyConfig = {
   high:   { color: '#ef4444', bg: 'rgba(239,68,68,.08)',   bd: 'rgba(239,68,68,.25)',   label: 'High Priority' },
@@ -55,16 +45,64 @@ function ApprovalCard({ item, onApprove, onReject, done }) {
         </div>
       )}
       {done && (
-        <div style={{ marginTop: 10, fontFamily: mono, fontSize: 11, color: C.dm }}>✓ Decision recorded · AI will continue processing</div>
+        <div style={{ marginTop: 10, fontFamily: mono, fontSize: 11, color: C.dm }}>✓ Decision recorded · AI will continue processing · Your response helps improve future decisions</div>
       )}
     </div>
   );
 }
 
 export default function PageBizApprovals({ st }) {
-  const { handoffs } = st;
+  const { handoffs, sessions, guardrails, toolCalls, agents, metrics } = st;
   const [approved, setApproved] = useState([]);
   const [rejected, setRejected] = useState([]);
+
+  /* Build approval items from real data */
+  const APPROVALS = useMemo(() => {
+    const items = [];
+    // Escalated sessions
+    sessions.filter(s => s.escalation === 'Escalated').forEach(s => {
+      const agent = agents.find(a => a.id === s.agentId);
+      const intent = (s.intents[0] || s.topics[0] || 'L2O workflow').replace(/_/g, ' ');
+      const time = s.start ? new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+      items.push({
+        id: `sess-${s.id}`,
+        type: 'Session Escalated to Human',
+        agent: agent?.displayName || 'AI Agent',
+        summary: `Session ${s.id} was escalated after ${s.messageCount} messages. Intent: ${intent}. Time before escalation: ${s.timeToEscMs ? (s.timeToEscMs / 1000).toFixed(0) + 's' : '—'}.`,
+        urgency: 'high',
+        time,
+        value: null,
+      });
+    });
+    // Failed guardrail checks
+    guardrails.filter(g => !g.passed).forEach(g => {
+      const time = g.ts ? new Date(g.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+      items.push({
+        id: `guard-${g.id}`,
+        type: 'Guardrail Block',
+        agent: g.agent,
+        summary: `"${g.name || 'Guardrail'}" blocked in session ${g.sessionId}. Reason: ${g.reasonCode || 'Policy violation'}. Confidence: ${g.confidence ?? '—'}.`,
+        urgency: 'medium',
+        time,
+        value: null,
+      });
+    });
+    // Failed tool calls
+    toolCalls.filter(t => !t.success).forEach(t => {
+      const time = t.ts ? new Date(t.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+      items.push({
+        id: `tool-${t.id}`,
+        type: 'Tool Failure',
+        agent: t.agent,
+        summary: `Tool "${t.name}" (${t.type || 'unknown'}) failed in session ${t.sessionId}.${t.error ? ' Error: ' + t.error : ''}`,
+        urgency: 'medium',
+        time,
+        value: null,
+      });
+    });
+    return items;
+  }, [sessions, guardrails, toolCalls, agents]);
+
   const pending = APPROVALS.filter(a => !approved.includes(a.id) && !rejected.includes(a.id));
   const resolved = APPROVALS.filter(a => approved.includes(a.id) || rejected.includes(a.id));
   const slaBreached = handoffs.filter(h => h.resTime > 900 && h.status !== 'resolved').length;
@@ -72,13 +110,22 @@ export default function PageBizApprovals({ st }) {
   return (
     <div className="anim-in" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+      {/* What is this page? */}
+      <div style={{ background: 'linear-gradient(135deg, rgba(0,154,218,.08) 0%, rgba(245,158,11,.05) 100%)', border: '1px solid rgba(0,154,218,.2)', borderRadius: 8, padding: '18px 22px' }}>
+        <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: ACCENT, marginBottom: 8 }}>What is this page?</div>
+        <div style={{ fontFamily: sans, fontSize: 13, color: C.tx, lineHeight: 1.75, fontWeight: 300 }}>
+          Your AI agents work autonomously most of the time. But when they encounter a situation that is <span style={{ color: '#f59e0b', fontWeight: 500 }}>high-value, ambiguous, or outside their confidence threshold</span>, they pause and ask for your decision rather than risk making the wrong call.
+          {' '}This page shows those items. <span style={{ color: C.tx, fontWeight: 500 }}>Your decisions here unblock the AI and are remembered</span> to improve its future confidence on similar tasks.
+        </div>
+      </div>
+
       {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+      <div className="grid-4">
         {[
           { label: 'Pending Your Decision',  val: pending.length,    col: pending.length > 3 ? '#ef4444' : '#f59e0b', sub: 'need human input' },
           { label: 'Resolved This Session',  val: resolved.length,   col: '#22c55e',  sub: 'approved or rejected' },
           { label: 'SLA Risk',               val: slaBreached,       col: slaBreached > 0 ? '#ef4444' : '#22c55e', sub: slaBreached > 0 ? 'items past 15 min' : 'all within SLA' },
-          { label: 'AI Auto-Resolved Today', val: rnd(140,180),      col: ACCENT,     sub: 'no human input needed' },
+          { label: 'AI Auto-Resolved',     val: metrics.deflectedCount,  col: ACCENT,     sub: 'sessions deflected without escalation' },
         ].map(x => (
           <div key={x.label} style={{ background: C.sf, border: `1px solid ${C.b}`, borderRadius: 6, padding: '18px 20px', borderTop: `3px solid ${x.col}` }}>
             <div style={{ fontFamily: sans, fontSize: 11, color: C.mu, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>{x.label}</div>
@@ -97,7 +144,7 @@ export default function PageBizApprovals({ st }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="grid-sidebar">
         <div>
           <div style={{ fontFamily: sans, fontSize: 13, fontWeight: 600, color: C.tx, marginBottom: 12 }}>
             {pending.length > 0 ? `${pending.length} Pending Approvals` : 'All caught up ✓'}
@@ -116,21 +163,42 @@ export default function PageBizApprovals({ st }) {
         <Panel title="Approval Insights">
           <div style={{ padding: '14px 16px' }}>
             {[
-              { label: 'Avg decision time',     val: '4.2 min',  col: '#22c55e' },
-              { label: 'Approval rate',          val: '76%',      col: ACCENT },
-              { label: 'Rejection rate',         val: '12%',      col: '#ef4444' },
-              { label: 'Delegated',              val: '12%',      col: '#a78bfa' },
+              { label: 'Total items',        val: APPROVALS.length,                                                  col: C.tx },
+              { label: 'Escalated sessions', val: sessions.filter(s => s.escalation === 'Escalated').length,        col: '#ef4444' },
+              { label: 'Guardrail blocks',   val: guardrails.filter(g => !g.passed).length,                        col: '#f59e0b' },
+              { label: 'Failed tool calls',  val: toolCalls.filter(t => !t.success).length,                        col: ACCENT },
             ].map(r => (
               <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: `1px solid ${C.b}` }}>
                 <span style={{ fontFamily: sans, fontSize: 12, color: C.mu }}>{r.label}</span>
                 <span style={{ fontFamily: mono, fontSize: 13, color: r.col, fontWeight: 500 }}>{r.val}</span>
               </div>
             ))}
-            <div style={{ marginTop: 14, padding: '10px 12px', background: C.sf2, borderRadius: 4, fontFamily: sans, fontSize: 11, color: C.mu, lineHeight: 1.7 }}>
-              Most common reason for human review:<br />
-              <span style={{ color: C.tx, fontWeight: 500 }}>Low confidence (58%)</span><br />
-              Policy threshold exceeded (24%)<br />
-              Ambiguous input data (18%)
+            {APPROVALS.length === 0 && (
+              <div style={{ marginTop: 14, padding: '10px 12px', background: 'rgba(34,197,94,.07)', border: '1px solid rgba(34,197,94,.2)', borderRadius: 4, fontFamily: sans, fontSize: 11, color: '#22c55e', lineHeight: 1.6 }}>
+                ✓ No items requiring approval in current dataset
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="Why AI Asks For Approval">
+          <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[
+              { icon: '🎯', title: 'Low confidence', body: 'The AI recognised it was not certain enough to act without risking an error. It stops rather than guess wrong.' },
+              { icon: '💰', title: 'High-value action', body: 'Transactions or changes above a set threshold are always escalated — an extra safety check for big decisions.' },
+              { icon: '📋', title: 'Policy boundary', body: 'The action would exceed a business rule (e.g. order quantity, discount level). AI defers to you to authorise exceptions.' },
+              { icon: '🔀', title: 'Ambiguous data', body: 'The input information was unclear or conflicting. The AI flags it rather than pick an answer that might be wrong.' },
+            ].map(r => (
+              <div key={r.title} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.b}` }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{r.icon}</span>
+                <div>
+                  <div style={{ fontFamily: sans, fontSize: 12, fontWeight: 600, color: C.tx, marginBottom: 3 }}>{r.title}</div>
+                  <div style={{ fontFamily: sans, fontSize: 11, color: C.mu, lineHeight: 1.5 }}>{r.body}</div>
+                </div>
+              </div>
+            ))}
+            <div style={{ marginTop: 4, padding: '10px 12px', background: 'rgba(0,154,218,.07)', border: '1px solid rgba(0,154,218,.2)', borderRadius: 4, fontFamily: sans, fontSize: 11, color: C.mu, lineHeight: 1.6 }}>
+              <span style={{ color: C.tx, fontWeight: 500 }}>Your decision improves the AI.</span> Every approval or rejection is fed back as a training signal — over time, the AI needs to ask less as it learns your preferences.
             </div>
           </div>
         </Panel>

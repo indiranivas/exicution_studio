@@ -7,6 +7,8 @@
   --b:rgba(255,255,255,0.07);--b2:rgba(255,255,255,0.13);
   --tx:#e8eaed;--mu:#6b7280;--dm:#3d4450;
   --sb:#2a3040;--logo-fg:white;
+  --topbar-h:48px;
+  --sidebar-w:220px;
 }
 .light{
   --bg:#f4f6f9;--sf:#ffffff;--sf2:#eef0f4;--sf3:#e4e7ec;
@@ -23,6 +25,153 @@ body,#root{background:var(--bg);min-height:100vh;transition:background .25s;}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes slideIn{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}
+@keyframes slideInLeft{from{opacity:0;transform:translateX(-100%)}to{opacity:1;transform:translateX(0)}}
 @keyframes ping{0%{opacity:.8;transform:scale(1)}100%{opacity:0;transform:scale(2.5)}}
 
 .anim-in{animation:fadeUp .3s ease both;}
+
+/* ─────────────────────────────────────────────
+   APP SHELL — responsive grid
+───────────────────────────────────────────── */
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: var(--topbar-h) 1fr;
+  min-height: 100vh;
+}
+
+/* ─────────────────────────────────────────────
+   SIDEBAR DRAWER (mobile)
+───────────────────────────────────────────── */
+.sidebar-drawer {
+  /* desktop: sticky sidebar column */
+  position: sticky;
+  top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+}
+.sidebar-overlay {
+  display: none;
+}
+
+/* ─────────────────────────────────────────────
+   TOPBAR breadcrumb — hide on very small screens
+───────────────────────────────────────────── */
+.topbar-breadcrumb-sep  { display: block; }
+.topbar-breadcrumb-label { display: block; }
+.topbar-env-badges      { display: flex; align-items: center; gap: 8px; }
+
+/* ─────────────────────────────────────────────
+   RESPONSIVE GRID HELPERS
+   Used by all pages for their KPI/panel grids
+───────────────────────────────────────────── */
+
+/* 6-column KPI row → 3 → 2 → 1 */
+.grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+/* 4-column → 2 → 1 */
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+/* 3-column → 2 → 1 */
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+/* 2-column → 1 */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* 2-column sidebar layout (3fr 1fr) → 1 */
+.grid-sidebar { display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 16px; align-items: start; }
+/* page header action row */
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+.page-header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ─────────────────────────────────────────────
+   TABLET  ≤ 1024px
+───────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  :root { --sidebar-w: 200px; }
+  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-sidebar { grid-template-columns: 1fr 1fr; }
+}
+
+/* ─────────────────────────────────────────────
+   MOBILE  ≤ 768px
+───────────────────────────────────────────── */
+@media (max-width: 768px) {
+  :root { --topbar-h: 52px; }
+
+  /* Shell: topbar row, then content row — sidebar is pulled out of flow */
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Topbar stays its height naturally */
+  .app-shell > div:first-child {
+    flex-shrink: 0;
+  }
+
+  /* Main fills the remaining height */
+  .app-main {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Sidebar becomes a fixed overlay drawer — fully out of normal flow */
+  .sidebar-drawer {
+    position: fixed;
+    top: var(--topbar-h);
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    overflow-y: auto;
+  }
+  .sidebar-drawer.open {
+    transform: translateX(0);
+  }
+  /* Dim overlay behind drawer */
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    top: var(--topbar-h);
+    background: rgba(0,0,0,.55);
+    z-index: 199;
+    backdrop-filter: blur(2px);
+  }
+
+  /* Hide secondary topbar items on mobile */
+  .topbar-env-badges { display: none; }
+  .topbar-breadcrumb-sep,
+  .topbar-breadcrumb-label { display: none; }
+
+  /* All multi-col grids collapse to 1 or 2 */
+  .grid-6 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid-3 { grid-template-columns: 1fr; gap: 10px; }
+  .grid-2 { grid-template-columns: 1fr; gap: 12px; }
+  .grid-sidebar { grid-template-columns: 1fr; gap: 12px; }
+
+  .page-header { flex-direction: column; align-items: flex-start; }
+
+  /* Main content full width with less padding */
+  .app-main { padding: 16px !important; }
+}
+
+/* ─────────────────────────────────────────────
+   SMALL MOBILE  ≤ 480px
+───────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .grid-6 { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid-4 { grid-template-columns: 1fr 1fr; gap: 8px; }
+}
+
+/* ─────────────────────────────────────────────
+   HAMBURGER — only visible on mobile
+───────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hamburger { display: flex !important; }
+  .roi-banner-inner { grid-template-columns: 1fr !important; }
+  /* hide desktop-only dividers in topbar */
+  .topbar-div { display: none; }
+}
