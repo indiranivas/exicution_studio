@@ -45,7 +45,7 @@ export default function PageL2OGuardrails({ st }) {
     .filter(s => s.masked_prompt__c)
     .map(s => ({
       ts:     new Date(s.span_start__c).toLocaleTimeString(),
-      agent:  s.agent_dev_name__c === 'LeadToOrderSalesAssistant' ? 'Sales Assist' : 'Quote Specialist',
+      agent:  s.agent_dev_name__c?.replace(/([A-Z])/g, ' $1').trim() || s.agent_dev_name__c || '—',
       prompt: s.masked_prompt__c,
       session: s.session_id__c,
     }));

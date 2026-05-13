@@ -14,7 +14,7 @@ function OrchestrationFlow({ agents }) {
           <div style={{ width:8, height:8, borderRadius:'50%', background:C.am, boxShadow:`0 0 8px ${C.am}`, animation:'pulse 2s ease-in-out infinite', flexShrink:0 }} />
           <div>
             <div style={{ fontSize:13, fontWeight:500, fontFamily:sans, display:'flex', alignItems:'center', gap:8 }}>
-              {lead ? lead.name : 'lead-orchestrator-01'}
+              {lead ? lead.name : 'No lead agent'}
               <LeadBadge />
             </div>
             <div style={{ fontFamily:mono, fontSize:10, color:C.mu, marginTop:2 }}>
@@ -74,7 +74,7 @@ export default function PageAgentFleet({ st }) {
 
       <Panel
         title="Full agent fleet"
-        right={<span style={{ fontFamily:mono, fontSize:10, color:C.mu, marginLeft:'auto' }}>{agents.length} agents registered · 1 lead · {agents.filter(a=>a._deployed).length} deployed</span>}
+        right={<span style={{ fontFamily:mono, fontSize:10, color:C.mu, marginLeft:'auto' }}>{agents.length} agents registered · {agents.filter(a=>a.role==='lead').length} lead · {agents.filter(a=>a._deployed).length} deployed</span>}
       >
         <div style={{ padding:'0 16px' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>

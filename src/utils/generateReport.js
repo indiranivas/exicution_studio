@@ -211,7 +211,7 @@ function buildTechnicalSnapshot(st) {
     const avgQ = sq.length ? (sq.reduce((a, l) => a + l.qualityScore, 0) / sq.length).toFixed(3) : '—';
     return {
       id: s.id,
-      agent: s.agentDevName?.replace('LeadToOrder', ''),
+      agent: s.agentDevName?.replace(/([A-Z])/g, ' $1').trim() || s.agentDevName,
       messages: s.messageCount,
       deflected: s.deflection,
       escalated: s.escalation,

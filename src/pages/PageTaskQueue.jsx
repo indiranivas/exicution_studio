@@ -35,7 +35,7 @@ export default function PageTaskQueue({ st = {} }) {
                 {sessions.map(s => (
                   <tr key={s.id} style={{ borderBottom:`1px solid ${C.b2}` }}>
                     <td style={{ fontFamily:mono, fontSize:11, padding:'8px 10px', color:'#009ADA' }}>{s.id}</td>
-                    <td style={{ fontFamily:sans, fontSize:12, padding:'8px 10px', color:C.mu }}>{s.agentDevName?.replace('LeadToOrder','').replace('Assistant',' Assist').replace('Specialist',' Specialist')}</td>
+                    <td style={{ fontFamily:sans, fontSize:12, padding:'8px 10px', color:C.mu }}>{s.agentDevName?.replace(/([A-Z])/g, ' $1').trim() || '—'}</td>
                     <td style={{ padding:'8px 10px' }}><Pill status={s.deflection === 'Resolved' ? 'complete' : s.escalation === 'Escalated' ? 'failed' : 'running'} /></td>
                     <td style={{ fontFamily:mono, fontSize:11, padding:'8px 10px', color:C.mu }}>{s.messageCount}</td>
                     <td style={{ fontFamily:mono, fontSize:11, padding:'8px 10px', color:C.dm }}>{s.durationMs ? `${Math.round(s.durationMs/1000)}s` : '—'}</td>

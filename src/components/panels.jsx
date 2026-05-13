@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { C, mono, sans } from '../constants/palette.js';
-import { AGENT_DEFS } from '../constants/agentDefs.js';
-import { rnd, pick } from '../utils/dataHelpers.js';
 import { Panel, Pill, ConfVal, Bar, LeadBadge, Th, Td } from './ui.jsx';
 
 export function AgentTable({ agents }) {
@@ -215,83 +213,243 @@ export function LogStream({ logs, maxHeight = 180 }) {
 }
 
 export function LearningPanel({ st }) {
-  const { feedback = [], guardrails = [], agents = [], metrics = {} } = st || {};
+  const { feedback = [], guardrails = [], agents = [], metrics = {}, sessions = [] } = st || {};
 
-  // Corrections = feedback items that were NOT accepted (human overrides)
-  const corrections = feedback.filter(f => f.actionType !== 'accepted');
+  const corrections   = feedback.filter(f => f.actionType !== 'accepted');
   const correctionCount = corrections.length;
-
-  // Patterns = distinct failure reason codes from guardrail blocks
-  const failedGR = guardrails.filter(g => !g.passed);
-  const patternSet = new Set(failedGR.map(g => g.reasonCode || g.name).filter(Boolean));
-  const patternCount = patternSet.size;
-
-  // Prompts updated = number of distinct agents that have a version string
-  const promptsUpdated = agents.filter(a => a.version).length;
-
-  // Override rate = rejected feedback / total feedback
+  const failedGR      = guardrails.filter(g => !g.passed);
   const totalFeedback = feedback.length || 1;
-  const overrideRate = ((correctionCount / totalFeedback) * 100).toFixed(1);
-  const overrideOk = parseFloat(overrideRate) < 5;
+  const overrideRate  = ((correctionCount / totalFeedback) * 100).toFixed(1);
+  const overrideOk    = parseFloat(overrideRate) < 5;
 
-  // Agent with most corrections
-  const corrByAgent = {};
-  corrections.forEach(f => { corrByAgent[f.agent] = (corrByAgent[f.agent] || 0) + 1; });
-  const topCorrAgent = Object.entries(corrByAgent).sort((a, b) => b[1] - a[1])[0];
-  const pendingAgent = topCorrAgent ? topCorrAgent[0] : (agents[0]?.displayName || 'N/A');
-  const pendingExamples = topCorrAgent ? topCorrAgent[1] : correctionCount;
-
-  // Top recurring failure pattern
+  // Group guardrail blocks by reason code for pattern analysis
   const patternFreq = {};
-  failedGR.forEach(g => { const k = g.reasonCode || g.name || g.type; patternFreq[k] = (patternFreq[k] || 0) + 1; });
-  const topPattern = Object.entries(patternFreq).sort((a, b) => b[1] - a[1])[0];
-  const patternThresholdMet = topPattern && topPattern[1] >= 2;
+  failedGR.forEach(g => {
+    const k = g.reasonCode || g.name || g.type || 'Unknown';
+    if (!patternFreq[k]) patternFreq[k] = { count: 0, type: g.type, name: g.name, sessions: new Set() };
+    patternFreq[k].count++;
+    if (g.sessionId) patternFreq[k].sessions.add(g.sessionId);
+  });
+  const patterns     = Object.entries(patternFreq).sort((a, b) => b[1].count - a[1].count);
+  const patternCount = patterns.length;
+  const versionedAgents = agents.filter(a => a.version);
 
-  // Agent version info for prompt versioning row
-  const versionedAgent = agents.find(a => a.version) || agents[0];
-  const versionNote = versionedAgent
-    ? `${versionedAgent.displayName} v${versionedAgent.version} · conf ${(versionedAgent.conf * 100).toFixed(0)}%`
-    : 'No versioned agents';
+  const ACTION_COL  = { rejected: C.re, edited: C.am, corrected: C.am };
+  const TYPE_COL    = { PII: '#a78bfa', Policy: C.am, Toxicity: C.re };
+  const statusBadge = (s) => ({ ok: C.gr, warn: C.am, err: C.re }[s] || C.mu);
 
   return (
-    <Panel title="Learning & corrections">
-      <div style={{ padding:'14px 16px' }}>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:14 }}>
-          {[
-            { label:'Corrections', val: correctionCount, col: C.bl },
-            { label:'Patterns',    val: patternCount,    col: C.am },
-            { label:'Prompts updated', val: promptsUpdated, col: C.gr },
-          ].map(x => (
-            <div key={x.label} style={{ background:C.sf2, borderRadius:3, padding:'10px 12px' }}>
-              <div style={{ fontSize:18, fontWeight:300, color:x.col, marginBottom:2, fontFamily:sans }}>{x.val}</div>
-              <div style={{ fontFamily:mono, fontSize:10, color:C.mu, textTransform:'uppercase', letterSpacing:'.05em' }}>{x.label}</div>
-            </div>
-          ))}
-        </div>
+    <div className="anim-in" style={{ display:'flex', flexDirection:'column', gap:16 }}>
+
+      {/* KPI strip */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
         {[
-          ['✏','Correction logging','Every human override captured with context, label, and original output.'],
-          ['⊞','Pattern detection', patternThresholdMet
-            ? `Same failure ≥2× triggers prompt-update candidate. ${patternCount} distinct pattern${patternCount !== 1 ? 's' : ''} flagged.`
-            : `${failedGR.length} guardrail block${failedGR.length !== 1 ? 's' : ''} recorded — ${patternCount} unique reason${patternCount !== 1 ? 's' : ''}.`],
-          ['↺','Threshold recalibration',`Thresholds tuned when override rate exceeds 5%. Current override rate: ${overrideRate}%.`],
-          ['◈','Prompt versioning', versionNote],
-        ].map(([icon, title, desc]) => (
-          <div key={title} style={{ display:'flex', gap:10, alignItems:'flex-start', padding:'9px 0', borderBottom:`1px solid ${C.b}`, fontSize:12 }}>
-            <div style={{ width:28, height:28, borderRadius:3, background:C.sf2, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, flexShrink:0 }}>{icon}</div>
-            <div style={{ color:C.mu, lineHeight:1.5 }}>
-              <b style={{ color:C.tx, fontWeight:500 }}>{title}</b><br />{desc}
-            </div>
+          { label:'Human Corrections', val: correctionCount, col: C.bl,
+            sub: `${feedback.length} total feedback event${feedback.length !== 1 ? 's' : ''} · ${feedback.filter(f => f.actionType === 'accepted').length} accepted` },
+          { label:'Failure Patterns',  val: patternCount,    col: C.am,
+            sub: `${failedGR.length} guardrail block${failedGR.length !== 1 ? 's' : ''} · ${patterns.filter(([,v]) => v.count >= 2).length} at threshold` },
+          { label:'Agents Versioned',  val: versionedAgents.length, col: C.gr,
+            sub: versionedAgents.map(a => `${a.displayName} v${a.version}`).join(' · ') || 'none' },
+        ].map(x => (
+          <div key={x.label} style={{ background:C.sf, border:`1px solid ${C.b}`, borderRadius:6, padding:'16px 18px' }}>
+            <div style={{ fontFamily:sans, fontSize:34, fontWeight:200, color:x.col, lineHeight:1 }}>{x.val}</div>
+            <div style={{ fontFamily:mono, fontSize:10, color:C.mu, textTransform:'uppercase', letterSpacing:'.06em', marginTop:6 }}>{x.label}</div>
+            <div style={{ fontFamily:mono, fontSize:10, color:C.dm, marginTop:3 }}>{x.sub}</div>
           </div>
         ))}
-        <div style={{ marginTop:12, padding:'10px 12px', background:C.sf2, borderRadius:3, fontFamily:mono, fontSize:10, color:C.mu, lineHeight:1.8 }}>
-          Override rate: <span style={{ color: overrideOk ? C.gr : C.am }}>{overrideRate}%</span> (target &lt;5%)<br />
-          Guardrail pass rate: <span style={{ color: metrics.guardrailPassRate >= 90 ? C.gr : C.am }}>{metrics.guardrailPassRate ?? 100}%</span><br />
-          {correctionCount > 0
-            ? <>Pending review: <span style={{ color:C.am }}>{pendingAgent} · {pendingExamples} override{pendingExamples !== 1 ? 's' : ''}</span></>
-            : <span style={{ color:C.gr }}>No pending corrections</span>
-          }
-        </div>
       </div>
-    </Panel>
+
+      <div className="grid-2" style={{ alignItems:'start' }}>
+
+        {/* Correction detail */}
+        <Panel title="Human Corrections"
+          subtitle={correctionCount === 0 ? 'All agent outputs accepted — no overrides recorded' : `${correctionCount} output${correctionCount !== 1 ? 's' : ''} were edited or rejected by a human reviewer`}>
+          {correctionCount === 0 ? (
+            <div style={{ padding:'28px 16px', textAlign:'center', fontFamily:mono, fontSize:11, color:C.gr }}>
+              ✓ No corrections needed this session
+            </div>
+          ) : corrections.map((c, i) => (
+            <div key={i} style={{ padding:'10px 16px', borderBottom:`1px solid ${C.b}` }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                <div style={{ display:'flex', gap:7, alignItems:'center' }}>
+                  <span style={{ fontFamily:sans, fontSize:12, fontWeight:500, color:C.tx }}>{c.agent}</span>
+                  <span style={{ fontFamily:mono, fontSize:9, padding:'1px 6px', borderRadius:2,
+                    background:(ACTION_COL[c.actionType]||C.mu)+'22', color:ACTION_COL[c.actionType]||C.mu,
+                    border:`1px solid ${(ACTION_COL[c.actionType]||C.mu)}44`, textTransform:'uppercase' }}>
+                    {c.actionType}
+                  </span>
+                  {c.sentiment && <span style={{ fontFamily:mono, fontSize:9, color:c.sentiment==='negative'?C.re:C.gr }}>{c.sentiment}</span>}
+                </div>
+                <span style={{ fontFamily:mono, fontSize:10, color:C.dm }}>{c.ts ? new Date(c.ts).toLocaleTimeString() : '—'}</span>
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:10, fontFamily:mono, fontSize:10, color:C.mu, marginBottom: c.text ? 5 : 0 }}>
+                {c.intent  && <span>intent: <span style={{ color:C.tx }}>{c.intent.replace(/_/g,' ')}</span></span>}
+                {c.topic   && <span>topic: <span style={{ color:C.tx }}>{c.topic.replace(/_/g,' ')}</span></span>}
+                {c.editDistance != null && <span>edit Δ: <span style={{ color:c.editDistance > 10 ? C.re : C.am }}>{c.editDistance} chars</span></span>}
+                <span style={{ color:C.bl }}>session {c.sessionId}</span>
+              </div>
+              {c.text && (
+                <div style={{ padding:'6px 10px', background:C.sf2, borderRadius:3, fontFamily:mono, fontSize:10, color:C.mu, fontStyle:'italic', lineHeight:1.5 }}>
+                  "{c.text.length > 140 ? c.text.slice(0,140)+'…' : c.text}"
+                </div>
+              )}
+            </div>
+          ))}
+          {correctionCount > 0 && (
+            <div style={{ padding:'8px 16px', fontFamily:mono, fontSize:10, color:C.dm }}>
+              Each correction is stored with original output, edit delta, and intent label to feed future fine-tuning runs.
+            </div>
+          )}
+        </Panel>
+
+        {/* Failure patterns */}
+        <Panel title="Failure Patterns"
+          subtitle="Guardrail blocks grouped by reason code — ≥2 occurrences flags a prompt-update candidate">
+          {patterns.length === 0 ? (
+            <div style={{ padding:'28px 16px', textAlign:'center', fontFamily:mono, fontSize:11, color:C.gr }}>
+              ✓ No repeated failure patterns detected
+            </div>
+          ) : patterns.map(([code, info]) => {
+            const isPattern = info.count >= 2;
+            const typeCol   = TYPE_COL[info.type] || C.mu;
+            return (
+              <div key={code} style={{ padding:'10px 16px', borderBottom:`1px solid ${C.b}` }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
+                  <div>
+                    <span style={{ fontFamily:sans, fontSize:12, fontWeight:500, color:C.tx }}>
+                      {code.replace(/_/g,' ')}
+                    </span>
+                    {isPattern && (
+                      <span style={{ marginLeft:8, fontFamily:mono, fontSize:9, padding:'1px 6px', borderRadius:2,
+                        background:C.am+'22', color:C.am, border:`1px solid ${C.am}44` }}>PATTERN</span>
+                    )}
+                  </div>
+                  <span style={{ fontFamily:mono, fontSize:22, fontWeight:200, color:isPattern ? C.am : C.mu }}>{info.count}×</span>
+                </div>
+                <div style={{ display:'flex', gap:10, fontFamily:mono, fontSize:10, color:C.mu, marginBottom: isPattern ? 5 : 0 }}>
+                  <span>type: <span style={{ color:typeCol }}>{info.type || '—'}</span></span>
+                  <span>guardrail: <span style={{ color:C.tx }}>{info.name || '—'}</span></span>
+                  <span>sessions: <span style={{ color:C.bl }}>{info.sessions.size}</span></span>
+                </div>
+                {isPattern && (
+                  <div style={{ padding:'5px 8px', background:C.am+'11', borderRadius:3, fontFamily:mono, fontSize:10, color:C.am, border:`1px solid ${C.am}22` }}>
+                    ↺ Flagged for prompt review — same failure reason triggered {info.count}× across {info.sessions.size} session{info.sessions.size !== 1 ? 's' : ''}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {patterns.length > 0 && (
+            <div style={{ padding:'8px 16px', fontFamily:mono, fontSize:10, color:C.dm }}>
+              Any reason code appearing ≥2× is a candidate for prompt tuning or threshold adjustment.
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid-2" style={{ alignItems:'start' }}>
+
+        {/* System status */}
+        <Panel title="Learning System Status">
+          <div style={{ padding:'0 16px 12px' }}>
+            {[
+              {
+                icon:'✏', title:'Correction logging',
+                status: correctionCount === 0 ? 'ok' : correctionCount < 3 ? 'warn' : 'err',
+                desc: correctionCount > 0
+                  ? `${correctionCount} override${correctionCount !== 1 ? 's' : ''} captured this session. Each includes the original output, correction content, and a classification label for the training pipeline.`
+                  : 'All agent outputs accepted without modification — system performing within expectations.',
+              },
+              {
+                icon:'⊞', title:'Pattern detection',
+                status: patternCount === 0 ? 'ok' : 'warn',
+                desc: failedGR.length > 0
+                  ? `${failedGR.length} guardrail block${failedGR.length !== 1 ? 's' : ''} across ${patternCount} distinct reason code${patternCount !== 1 ? 's' : ''}. ${patterns.filter(([,v]) => v.count >= 2).length > 0 ? 'Patterns at threshold: ' + patterns.filter(([,v]) => v.count >= 2).map(([k]) => k.replace(/_/g,' ')).join(', ') + '.' : 'No codes at threshold yet.'}`
+                  : 'No guardrail blocks recorded — all safety checks passed.',
+              },
+              {
+                icon:'↺', title:'Threshold recalibration',
+                status: overrideOk ? 'ok' : 'warn',
+                desc: `Thresholds auto-tune when override rate exceeds 5%. Current rate: ${overrideRate}% (${correctionCount} overrides / ${feedback.length} feedback events). ${overrideOk ? 'Within target — no recalibration triggered.' : 'Above target — recalibration candidate.'}`,
+              },
+              {
+                icon:'◈', title:'Prompt versioning',
+                status: 'ok',
+                desc: versionedAgents.length > 0
+                  ? versionedAgents.map(a => `${a.displayName} v${a.version} — avg quality ${(a.conf*100).toFixed(0)}%, ${a.llmCallCount||0} LLM call${a.llmCallCount !== 1 ? 's' : ''} this session`).join('. ')
+                  : 'No version metadata in current dataset.',
+              },
+            ].map(({ icon, title, status, desc }) => (
+              <div key={title} style={{ display:'flex', gap:10, alignItems:'flex-start', padding:'10px 0', borderBottom:`1px solid ${C.b}`, fontSize:12 }}>
+                <div style={{ width:28, height:28, borderRadius:3, background:C.sf2, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, flexShrink:0 }}>{icon}</div>
+                <div style={{ flex:1, color:C.mu, lineHeight:1.6 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:2 }}>
+                    <b style={{ color:C.tx, fontWeight:500, fontSize:12 }}>{title}</b>
+                    <span style={{ fontFamily:mono, fontSize:9, padding:'1px 6px', borderRadius:2,
+                      background:statusBadge(status)+'22', color:statusBadge(status), border:`1px solid ${statusBadge(status)}44` }}>
+                      {status.toUpperCase()}
+                    </span>
+                  </div>
+                  {desc}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        {/* Per-agent breakdown */}
+        <Panel title="Agent Quality Registry" subtitle="Per-agent correction and guardrail breakdown this session">
+          <div style={{ padding:'0 16px 12px' }}>
+            {agents.length === 0 ? (
+              <div style={{ padding:'28px 0', textAlign:'center', fontFamily:mono, fontSize:11, color:C.dm }}>No agent data loaded.</div>
+            ) : agents.map(a => {
+              const myFB   = feedback.filter(f  => f.agent === a.displayName);
+              const myCorr = myFB.filter(f => f.actionType !== 'accepted');
+              const myBlocks = guardrails.filter(g => g.agent === a.displayName && !g.passed);
+              const qualOk   = a.conf >= 0.75;
+              return (
+                <div key={a.id} style={{ padding:'12px 0', borderBottom:`1px solid ${C.b}` }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                    <div>
+                      <div style={{ fontFamily:sans, fontSize:13, fontWeight:500, color:C.tx }}>{a.displayName}</div>
+                      <div style={{ fontFamily:mono, fontSize:10, color:C.mu, marginTop:2 }}>
+                        {a.version ? `v${a.version}` : 'unversioned'} · {a.model} · {a.type.replace(/_/g,' ')}
+                      </div>
+                    </div>
+                    <div style={{ textAlign:'right' }}>
+                      <div style={{ fontFamily:mono, fontSize:22, fontWeight:300, color: qualOk ? C.gr : C.am, lineHeight:1 }}>{(a.conf*100).toFixed(0)}%</div>
+                      <div style={{ fontFamily:mono, fontSize:9, color:C.dm }}>avg quality</div>
+                    </div>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginBottom:8 }}>
+                    {[
+                      { label:'Feedback',   val: myFB.length,      col: C.bl },
+                      { label:'Overrides',  val: myCorr.length,    col: myCorr.length > 0 ? C.am : C.gr },
+                      { label:'GR blocks',  val: myBlocks.length,  col: myBlocks.length > 0 ? C.re : C.gr },
+                      { label:'LLM calls',  val: a.llmCallCount||0, col: C.mu },
+                    ].map(m => (
+                      <div key={m.label} style={{ background:C.sf2, borderRadius:3, padding:'6px 8px', textAlign:'center' }}>
+                        <div style={{ fontFamily:mono, fontSize:14, fontWeight:300, color:m.col }}>{m.val}</div>
+                        <div style={{ fontFamily:mono, fontSize:9, color:C.dm, marginTop:1 }}>{m.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {myCorr.length > 0 && (
+                    <div style={{ fontFamily:mono, fontSize:10, color:C.am, padding:'4px 8px', background:C.am+'11', borderRadius:3 }}>
+                      {myCorr.length} override{myCorr.length !== 1 ? 's' : ''} — topics: {[...new Set(myCorr.map(c => c.topic||c.intent||'unknown').filter(Boolean))].join(', ')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ marginTop:10, padding:'8px 10px', background:C.sf2, borderRadius:3, fontFamily:mono, fontSize:10, color:C.mu, lineHeight:1.8 }}>
+              Override rate: <span style={{ color: overrideOk ? C.gr : C.am }}>{overrideRate}%</span> (target &lt;5%) ·{' '}
+              Guardrail pass rate: <span style={{ color: (metrics.guardrailPassRate ?? 100) >= 90 ? C.gr : C.am }}>{metrics.guardrailPassRate ?? 100}%</span> ·{' '}
+              Feedback accept rate: <span style={{ color: (metrics.feedbackAcceptRate ?? 100) >= 80 ? C.gr : C.am }}>{metrics.feedbackAcceptRate ?? 100}%</span>
+            </div>
+          </div>
+        </Panel>
+      </div>
+    </div>
   );
 }

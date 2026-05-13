@@ -42,9 +42,7 @@ export default function PageFailureExplorer({ st }) {
     );
     return raw.map((s, i) => {
       const sess = sessions.find(ss => ss.id === s.session_id__c);
-      const agentName = s.agent_dev_name__c === 'LeadToOrderSalesAssistant'
-        ? 'Sales Assist Agent' : s.agent_dev_name__c === 'LeadToOrderQuoteSpecialist'
-        ? 'Quote Specialist Agent' : s.agent_dev_name__c;
+      const agentName = s.agent_dev_name__c?.replace(/([A-Z])/g, ' $1').trim() || s.agent_dev_name__c || '—';
       const reason = s.span_status_message__c || s.guardrail_reason_code__c
         || s.tool_error_message__c || s.span_kind__c.toLowerCase().replace(/_/g,' ');
       const conf = s.guardrail_confidence__c ?? s.overall_quality_score__c ?? null;

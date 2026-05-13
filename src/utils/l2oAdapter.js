@@ -33,6 +33,16 @@ const AGENT_META = {
   },
 };
 
+/* ─── Agent name helpers (consistent across all output shapes) ── */
+function agentDisplayName(devName) {
+  return AGENT_META[devName]?.displayName
+    || (devName ? devName.replace(/([A-Z])/g, ' $1').trim() : '—');
+}
+function agentShortName(devName) {
+  return AGENT_META[devName]?.name
+    || (devName ? devName.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase() : '—');
+}
+
 /* ─── Pipeline stage ordering ───────────────────────────────── */
 const PIPELINE_ORDER = [
   'Pricing_Inquiry',
@@ -101,7 +111,7 @@ export function parseL2OData(rows) {
     intents: Array.from(s.intents),
   }));
 
-  /* 3. Agents — derived from sessions + spans */
+  /* 3. Agents — derived from all agent dev names present in spans */
   const agentSpans = {};
   for (const r of spans) {
     const k = r.agent_dev_name__c;
@@ -109,14 +119,30 @@ export function parseL2OData(rows) {
     agentSpans[k].push(r);
   }
 
-  const agents = Object.entries(AGENT_META).map(([devName, meta]) => {
-    const mySpans    = agentSpans[devName] || [];
+  const agents = Object.keys(agentSpans).map(devName => {
+    const knownMeta  = AGENT_META[devName]; // optional override; undefined for unknown agents
+    const mySpans    = agentSpans[devName];
     const mySessions = sessions.filter(s => s.agentDevName === devName);
     const myLLM      = mySpans.filter(s => s.span_kind__c === 'LLM_CALL');
     const myTools    = mySpans.filter(s => s.span_kind__c === 'TOOL_CALL');
     const myGuards   = mySpans.filter(s => s.span_kind__c === 'GUARDRAIL');
     const failedSpans= mySpans.filter(s => s.span_status__c !== 'Ok');
     const escalated  = mySessions.some(s => s.escalation === 'Escalated');
+    const hasPlanner = mySpans.some(s => s.span_kind__c === 'PLANNER');
+
+    // Derive display metadata; AGENT_META values take precedence when available
+    const displayName = knownMeta?.displayName
+      || devName.replace(/([A-Z])/g, ' $1').trim();
+    const name = knownMeta?.name
+      || devName.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+    const id = knownMeta?.id
+      || mySpans[0]?.agent_id__c
+      || `agt_${name.slice(0, 8)}`;
+    const models = [...new Set(mySpans.filter(s => s.model_name__c).map(s => s.model_name__c))];
+    const model   = knownMeta?.model   || models.join(' / ') || 'unknown';
+    const type    = knownMeta?.type    || 'agent';
+    const role    = knownMeta?.role    || (hasPlanner ? 'lead' : 'worker');
+    const version = knownMeta?.version || mySpans[0]?.agent_version__c || null;
 
     const avgConf = myLLM.length
       ? myLLM.reduce((a, r) => a + (r.overall_quality_score__c || 0), 0) / myLLM.length
@@ -127,29 +153,21 @@ export function parseL2OData(rows) {
       : 2000;
 
     const totalTokens = myLLM.reduce((a, r) => a + (r.total_tokens__c || 0), 0);
-    const tokenCostUsd = +(totalTokens * 0.000003).toFixed(4); // ~$3/1M tokens
+    const tokenCostUsd = +(totalTokens * 0.000003).toFixed(4);
 
     return {
-      id:          meta.id,
-      name:        meta.name,
-      displayName: meta.displayName,
-      model:       meta.model,
-      type:        meta.type,
-      role:        meta.role,
-      version:     meta.version,
-      // Status derived from session escalation & span failures
+      id, devName, name, displayName, model, type, role, version,
       status:      failedSpans.length > 0 ? 'failed'
                  : escalated             ? 'review'
                  :                         'running',
       step:        mySessions.length,
-      totalSteps:  PIPELINE_ORDER.length,
+      totalSteps:  PIPELINE_ORDER.length, // updated to pipeline.length after section 8
       conf:        +avgConf.toFixed(3),
       tasks:       mySessions.reduce((a, s) => a + s.messageCount, 0),
       errors:      failedSpans.length,
       latency:     avgLatency,
       tokenCost:   tokenCostUsd,
-      dispatched:  meta.role === 'lead' ? mySpans.filter(s => s.span_kind__c === 'INTERNAL').length : undefined,
-      // Extra L2O fields
+      dispatched:  role === 'lead' ? mySpans.filter(s => s.span_kind__c === 'INTERNAL').length : undefined,
       sessionCount:    mySessions.length,
       toolCallCount:   myTools.length,
       guardrailCount:  myGuards.length,
@@ -157,7 +175,6 @@ export function parseL2OData(rows) {
       totalInputTokens:  myLLM.reduce((a, r) => a + (r.input_tokens__c || 0), 0),
       totalOutputTokens: myLLM.reduce((a, r) => a + (r.output_tokens__c || 0), 0),
       totalTokens,
-      // Fields used by MeltTelemetry and AgentFleet
       _deployed:  true,
       _melt:      ['L1','L2','L3','L4','L5','L6'],
       _tools:     [...new Set(myTools.map(t => t.tool_name__c).filter(Boolean))],
@@ -172,7 +189,7 @@ export function parseL2OData(rows) {
       id:         r.guardrail_check_id__c,
       spanId:     r.span_id__c,
       sessionId:  r.session_id__c,
-      agent:      AGENT_META[r.agent_dev_name__c]?.displayName || r.agent_dev_name__c,
+      agent:      agentDisplayName(r.agent_dev_name__c),
       name:       r.guardrail_name__c,
       type:       r.guardrail_type__c,       // PII | Policy | Toxicity
       passed:     r.guardrail_passed__c,
@@ -194,7 +211,7 @@ export function parseL2OData(rows) {
       return {
         id:         r.tool_invocation_id__c,
         sessionId:  r.session_id__c,
-        agent:      AGENT_META[r.agent_dev_name__c]?.displayName || r.agent_dev_name__c,
+        agent:      agentDisplayName(r.agent_dev_name__c),
         name:       r.tool_name__c,
         type:       r.tool_type__c,            // DataCloud | Flow | Apex | CPQ
         success:    r.tool_success__c,
@@ -215,7 +232,7 @@ export function parseL2OData(rows) {
     .map(r => ({
       id:              r.llm_call_id__c,
       sessionId:       r.session_id__c,
-      agent:           AGENT_META[r.agent_dev_name__c]?.displayName || r.agent_dev_name__c,
+      agent:           agentDisplayName(r.agent_dev_name__c),
       model:           r.model_name__c,
       provider:        r.provider__c,
       feature:         r.feature__c,
@@ -242,7 +259,7 @@ export function parseL2OData(rows) {
     .map(r => ({
       llmCallId:   r.llm_call_id__c,
       sessionId:   r.session_id__c,
-      agent:       AGENT_META[r.agent_dev_name__c]?.displayName || r.agent_dev_name__c,
+      agent:       agentDisplayName(r.agent_dev_name__c),
       type:        r.feedback_type__c,
       sentiment:   r.feedback_sentiment__c,    // positive | negative
       text:        r.feedback_text__c,
@@ -253,19 +270,24 @@ export function parseL2OData(rows) {
       ts:          r.span_start__c,
     }));
 
-  /* 8. Pipeline stages — session count per topic/stage */
+  /* 8. Pipeline stages — all known L2O stages in order + any new stages from data */
   const stageCounts = {};
   for (const s of sessions) {
     for (const t of s.topics) {
       stageCounts[t] = (stageCounts[t] || 0) + 1;
     }
   }
-  const pipeline = PIPELINE_ORDER.map(stage => ({
+  // Known stages in canonical order, then any unrecognised stages alphabetically
+  const unknownStages  = Object.keys(stageCounts).filter(s => !PIPELINE_ORDER.includes(s)).sort();
+  const allStageOrder  = [...PIPELINE_ORDER, ...unknownStages];
+  const pipeline = allStageOrder.map(stage => ({
     stage,
     label: stage.replace(/_/g, ' '),
     count: stageCounts[stage] || 0,
     reached: (stageCounts[stage] || 0) > 0,
   }));
+  // Sync totalSteps on all agents to the actual pipeline length
+  for (const a of agents) a.totalSteps = pipeline.length;
 
   /* 9. Logs — convert spans to the log format the dashboard expects */
   const logs = spans
@@ -274,7 +296,7 @@ export function parseL2OData(rows) {
       const level = r.span_status__c === 'Ok'
         ? (r.guardrail_passed__c === false ? 'warn' : r.is_toxic__c ? 'err' : 'ok')
         : 'err';
-      const agentShort = AGENT_META[r.agent_dev_name__c]?.name || r.agent_dev_name__c;
+      const agentShort = agentShortName(r.agent_dev_name__c);
       const msg = r.span_kind__c === 'TOOL_CALL'
         ? `${agentShort} · tool_call ${r.tool_name__c} · ${r.span_duration_ms__c}ms · ${r.tool_success__c ? '✓' : '✗'}`
         : r.span_kind__c === 'GUARDRAIL'
@@ -321,15 +343,19 @@ export function parseL2OData(rows) {
   const handoffs = spans
     .filter(r => r.span_kind__c === 'INTERNAL' || r.escalation_status__c === 'Escalated')
     .filter((r, i, arr) => arr.findIndex(x => x.span_id__c === r.span_id__c) === i)
-    .map(r => ({
-      id:      r.span_id__c,
-      agent:   AGENT_META[r.agent_dev_name__c]?.displayName || r.agent_dev_name__c,
-      reason:  r.span_status_message__c || r.guardrail_reason_code__c || 'Agent handoff',
-      conf:    r.guardrail_confidence__c?.toFixed(2) || '0.00',
-      ts:      new Date(r.span_start__c).toTimeString().slice(0, 8),
-      status:  r.escalation_status__c === 'Escalated' ? 'reviewing' : 'resolved',
-      resTime: Math.round((r.time_before_escalation_ms__c || r.span_duration_ms__c || 120000) / 1000),
-    }));
+    .map(r => {
+      // LLM quality score is most meaningful for handoffs; fall back to guardrail confidence
+      const confRaw = r.overall_quality_score__c ?? r.guardrail_confidence__c ?? null;
+      return {
+        id:      r.span_id__c,
+        agent:   agentDisplayName(r.agent_dev_name__c),
+        reason:  r.span_status_message__c || r.guardrail_reason_code__c || 'Agent handoff',
+        conf:    confRaw !== null ? confRaw.toFixed(2) : '—',
+        ts:      new Date(r.span_start__c).toTimeString().slice(0, 8),
+        status:  r.escalation_status__c === 'Escalated' ? 'reviewing' : 'resolved',
+        resTime: Math.round((r.time_before_escalation_ms__c || r.span_duration_ms__c || 120000) / 1000),
+      };
+    });
 
   /* 12. Aggregate metrics — single object matching makeMetrics() shape */
   const totalTasks     = sessions.reduce((a, s) => a + s.messageCount, 0);

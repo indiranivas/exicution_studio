@@ -90,7 +90,7 @@ function buildLiveData(agent, st) {
       handoffs_by_hour: `[${myHands.length} handoffs]`,
       override_rate:    `${((myHands.length / Math.max(agent.tasks, 1)) * 100).toFixed(1)}%`,
       pattern_count:    patternSet.size,
-      prompt_version:   `v${agent.version}`,
+      prompt_version:   agent.version ? `v${agent.version}` : '—',
     },
   };
 }

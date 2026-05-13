@@ -47,7 +47,7 @@ function StageNode({ stage, idx, total, sessions }) {
 }
 
 function SessionRow({ sess, idx }) {
-  const agent = sess.agentDevName === 'LeadToOrderSalesAssistant' ? 'Sales Assist' : 'Quote Specialist';
+  const agent = sess.agentDevName?.replace(/([A-Z])/g, ' $1').trim() || sess.agentDevName || '—';
   const statusColor = sess.escalation === 'Escalated' ? C.re : sess.deflection === 'Resolved' ? C.gr : C.am;
   const durationSec = Math.round(sess.durationMs / 1000);
   return (
@@ -105,6 +105,18 @@ export default function PageL2OPipeline({ st }) {
 
   const maxIntent = Math.max(...Object.values(intentDist), 1);
 
+  const reachedStages  = pipeline.filter(p => p.reached);
+  const topIntents     = Object.entries(intentDist).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k.replace(/_/g, ' '));
+  const discountBlock  = guardrails.find(g => !g.passed && (g.name?.toLowerCase().includes('discount') || g.reasonCode?.includes('DISCOUNT')));
+  const orderReached   = pipeline.find(p => p.stage === 'Order_Booking' && p.reached);
+  const narrative = [
+    totalSessions > 0 && `${totalSessions} session${totalSessions !== 1 ? 's' : ''} processed.`,
+    reachedStages.length > 0 && `${reachedStages.length} of ${pipeline.length} pipeline stages reached: ${reachedStages.map(p => p.label.replace(/_/g, ' ')).join(' → ')}.`,
+    topIntents.length > 0 && `Top intent${topIntents.length > 1 ? 's' : ''}: ${topIntents.join(', ')}.`,
+    discountBlock && `Discount request escalated — blocked by policy (${discountBlock.reasonCode || discountBlock.name}).`,
+    orderReached ? 'Order booking stage reached — deal converted.' : escalated > 0 && `${escalated} escalation${escalated !== 1 ? 's' : ''} pending human review.`,
+  ].filter(Boolean).join(' ');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* KPI strip */}
@@ -130,7 +142,7 @@ export default function PageL2OPipeline({ st }) {
           ))}
         </div>
         <div style={{ marginTop: 12, padding: '10px 14px', background: C.gr + '11', border: `1px solid ${C.gr}33`, borderRadius: 6, fontFamily: sans, fontSize: 13, color: C.mu }}>
-          <strong style={{ color: C.gr }}>Deal narrative:</strong> ACME Corp (Manufacturing, 4,800 employees) initiated with a pricing inquiry, qualified at BANT 92/100, converted to OPP-2026-Q2-ACME-001 ($1.85M), CPQ quote generated with 15% discount routed for VP approval.
+          <strong style={{ color: C.gr }}>Deal narrative:</strong> {narrative || 'No session data loaded yet.'}
         </div>
       </Panel>
 
