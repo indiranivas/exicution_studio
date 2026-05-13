@@ -126,7 +126,16 @@ export function parseL2OData(rows) {
     const myLLM      = mySpans.filter(s => s.span_kind__c === 'LLM_CALL');
     const myTools    = mySpans.filter(s => s.span_kind__c === 'TOOL_CALL');
     const myGuards   = mySpans.filter(s => s.span_kind__c === 'GUARDRAIL');
-    const failedSpans= mySpans.filter(s => s.span_status__c !== 'Ok');
+    // Guardrail blocks are expected safety behaviour, not agent failures.
+    // Tool calls that failed but were retried successfully are also not final failures.
+    const succeededToolNames = new Set(
+      mySpans.filter(s => s.span_kind__c === 'TOOL_CALL' && s.tool_success__c === true).map(s => s.tool_name__c)
+    );
+    const failedSpans = mySpans.filter(s =>
+      s.span_status__c !== 'Ok' &&
+      s.span_kind__c !== 'GUARDRAIL' &&
+      !(s.span_kind__c === 'TOOL_CALL' && succeededToolNames.has(s.tool_name__c))
+    );
     const escalated  = mySessions.some(s => s.escalation === 'Escalated');
     const hasPlanner = mySpans.some(s => s.span_kind__c === 'PLANNER');
 
